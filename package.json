@@ -1,0 +1,22 @@
+{
+  "name": "agent-moderator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "node scripts/build.mjs",
+    "test:e2e": "npm run build && playwright test",
+    "check": "npm run test && npm run typecheck && npm run test:e2e",
+    "package": "npm run check && node scripts/package.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^26.6.4",
+    "esbuild": "^0.28.2",
+    "fflate": "^0.8.3",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}
