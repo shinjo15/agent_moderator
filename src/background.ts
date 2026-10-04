@@ -1,5 +1,18 @@
-import { deleteApiKey, getCredentialStatus, initializeCredentialStorage, saveApiKey } from './credential-store';
+import { deleteApiKey, getCredentialStatus, initializeCredentialStorage, readYouTubeApiKeyForBackground, saveApiKey } from './credential-store';
 import { runtime } from './extension-runtime';
+import { createYouTubeClient } from './youtube/client';
+import { createYouTubeHandler } from './youtube/background-handler';
+import { platform } from './youtube/extension-platform';
+
+const youtube = createYouTubeHandler({ session: platform.storage.session, tabs: platform.tabs, runtime,
+  client: createYouTubeClient(), initialize: initializeCredentialStorage, readApiKey: readYouTubeApiKeyForBackground });
+platform.storage.onChanged?.addListener((changes, area) => {
+  if (area === 'local' && 'apiKey.youtube' in changes) void youtube.credentialsChanged().catch(() => {});
+});
+platform.tabs?.onUpdated?.addListener((id, change) => {
+  if (change.url !== undefined) void youtube.targetChanged(id, change.url).catch(() => {});
+});
+platform.tabs?.onRemoved?.addListener(id => { void youtube.targetChanged(id).catch(() => {}); });
 
 // Start the gate on every worker activation, even before any settings message.
 void initializeCredentialStorage().catch(() => {});
@@ -12,6 +25,11 @@ runtime.onMessageExternal.addListener((_message, _sender, reply) => {
 });
 
 runtime.onMessage.addListener((message, sender, reply) => {
+  if (typeof message === 'object' && message !== null && 'type' in message &&
+      typeof message.type === 'string' && message.type.startsWith('youtube.')) {
+    void youtube.handle(message, sender).then(reply);
+    return true;
+  }
   if (sender.id !== runtime.id ||
       ![runtime.getURL('options.html'), runtime.getURL('popup.html')].includes(sender.url ?? '')) {
     reply(denied);
