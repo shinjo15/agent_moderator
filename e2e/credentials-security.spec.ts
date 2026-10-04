@@ -31,6 +31,59 @@ async function withExtension(run: (context: BrowserContext, worker: Worker, id: 
   finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
 }
 
+for (const fails of [false, true]) {
+  test(`初期storage.initの${fails ? '失敗' : '成功'}応答より先に入力した未送信キーを保持する`, async () => {
+    await withExtension(async (context, worker, id) => {
+      await worker.evaluate((fails) => {
+        const originalGet = chrome.storage.local.get.bind(chrome.storage.local);
+        let release!: () => void;
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        (globalThis as unknown as { releaseInitialRead: () => void }).releaseInitialRead = release;
+        chrome.storage.local.get = async (keys) => {
+          await gate;
+          if (fails) throw new Error('synthetic-init-private-error');
+          return originalGet(keys);
+        };
+      }, fails);
+      const page = await context.newPage();
+      await page.goto(`chrome-extension://${id}/options.html`);
+      await expect(page.getByTestId('youtube-status')).toHaveText('設定を確認中');
+      await expect(page.getByRole('button', { name: 'YouTubeキーを保存' })).toBeDisabled();
+      await page.getByLabel('Jev APIキー').fill('synthetic-initial-jev-draft');
+      await page.getByLabel('YouTube APIキー').fill('synthetic-initial-youtube-draft');
+      await worker.evaluate(() => (globalThis as unknown as { releaseInitialRead: () => void }).releaseInitialRead());
+      await expect(page.getByRole('status')).toHaveText(fails ?
+        'キー設定の処理に失敗しました。再試行してください。' : '設定を確認しました。');
+      await expect(page.getByLabel('Jev APIキー')).toHaveValue('synthetic-initial-jev-draft');
+      await expect(page.getByLabel('YouTube APIキー')).toHaveValue('synthetic-initial-youtube-draft');
+    });
+  });
+}
+
+for (const operation of ['save', 'delete', 'failed-save'] as const) {
+  test(`${operation}は対象providerだけをクリアし別providerの未送信入力を保持する`, async () => {
+    await withExtension(async (context, worker, id) => {
+      const page = await context.newPage();
+      await page.goto(`chrome-extension://${id}/options.html`);
+      await expect(page.getByTestId('youtube-status')).toHaveText('未設定：設定が必要です。');
+      if (operation === 'failed-save') {
+        await worker.evaluate(() => {
+          chrome.storage.local.set = async () => { throw new Error('synthetic-operation-private-error'); };
+        });
+      }
+      for (const [name, other] of [['YouTube', 'Jev'], ['Jev', 'YouTube']]) {
+        await page.getByLabel(`${name} APIキー`).fill('synthetic-operated-key');
+        await page.getByLabel(`${other} APIキー`).fill('synthetic-unsubmitted-draft');
+        await page.getByRole('button', { name: `${name}キーを${operation === 'delete' ? '削除' : '保存'}`, exact: true }).click();
+        await expect(page.getByLabel(`${name} APIキー`)).toHaveValue('');
+        await expect(page.getByLabel(`${other} APIキー`)).toHaveValue('synthetic-unsubmitted-draft');
+        await expect(page.getByRole('status')).toHaveText(operation === 'failed-save' ?
+          'キー設定の処理に失敗しました。再試行してください。' : '設定を確認しました。');
+      }
+    });
+  });
+}
+
 test('実contentのisolated contextではlocal読取不可、init/設定/取得応答にキーなし', async () => {
   await withExtension(async (context, worker, id) => {
     const options = await context.newPage();

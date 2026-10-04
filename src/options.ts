@@ -20,7 +20,12 @@ function render(status: CredentialStatus) {
   }
 }
 
-async function request(message: unknown) {
+type CredentialRequest =
+  | { type: 'storage.init' }
+  | { type: 'credentials.save'; provider: ApiKeyProvider; value: string }
+  | { type: 'credentials.delete'; provider: ApiKeyProvider };
+
+async function request(message: CredentialRequest) {
   if (busy) return;
   busy = true;
   for (const button of buttons) button.disabled = true;
@@ -37,8 +42,8 @@ async function request(message: unknown) {
   } catch {
     result.textContent = failure;
   } finally {
-    // Do not retain submitted secrets in the DOM, even on failure.
-    for (const field of fields.values()) field.input.value = '';
+    // Clear only the operated provider, even on failure. Init submits no key.
+    if (message.type !== 'storage.init') fields.get(message.provider)!.input.value = '';
     busy = false;
     for (const button of buttons) button.disabled = false;
   }

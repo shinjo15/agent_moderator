@@ -33,7 +33,7 @@
 `e2e/extension.spec.ts` の既存#1回帰を更新し、`e2e/credentials-security.spec.ts` を追加。
 
 - Jev / YouTubeともpassword入力、保存、差替え、空欄保持、個別削除。片方の削除がもう片方を消さない。
-- 保存処理後・reload後は入力欄が空。UIへのstorage.init応答は `{ ok: true, status: { jev: boolean, youtube: boolean } }` だけ。
+- 保存処理後は対象providerの入力欄が空で、別providerの未送信下書きは保持する。reload後は両入力欄が空。UIへのstorage.init応答は `{ ok: true, status: { jev: boolean, youtube: boolean } }` だけ。
 - trusted UIからのキー取得messageも拒否。保存済みキーを再表示しない。
 - ページreload、同じ一時プロファイルでブラウザ/service workerを再起動した後も保持。
 - matching YouTubeチャットURLへのアクセスをローカルHTML fixtureで応答。manifestによる実content注入をCDPの拡張origin＋isolated worldで確認し、そのcontextから `chrome.storage.local.get(null)` が拒否されることを検証。
@@ -54,22 +54,37 @@
 - 権限変更はstorageのみ。host_permissions・外部API通信は追加していない。
 - local保存の限界、コメントのJev送信、Jev利用料・YouTubeクォータの利用者負担をUIとREADMEに明記。
 
-## 最終実行結果
+## PR #8 CI失敗の調査・修正
+
+`gh run view 37193837803 --repo shinjo15/agent_moderator --log-failed` で実CIログを取得した。CI実測はunit 11 tests、typecheck、build成功、E2Eは4成功/1失敗。失敗は `e2e/extension.spec.ts:40` のJev入力保持assertionで、YouTube保存後の期待値 `synthetic-jev` に対し実値が空文字だった。これはCIの失敗結果であり、以下のローカル成功結果とは区別する。
+
+修正開始時のworktreeはclean。`npm run build`（exit 0）後、`npx playwright test e2e/extension.spec.ts` で同じline 40の失敗をローカル再現した（exit 1）。元のテストは未設定表示を確認してから両providerに入力しているので、この失敗は初期化待ち不足ではなく、保存finallyの全fieldクリアで未送信のJev入力を消す製品バグだった。
+
+初期storage.initにも同じfinallyが使われていた。実workerのlocal.getをpromise gateで保留し、初期確認中に両入力欄へsynthetic下書きを入力してからgateを解放するテストを追加した。成功・失敗応答のどちらでも下書きが消えることを `npx playwright test e2e/credentials-security.spec.ts -g '初期storage.init'` で再現した（2 failures、exit 1）。固定sleepやretryでタイミングを隠していない。
+
+修正は `src/options.ts` の入力クリア範囲に限定した。requestをinit/save/deleteの判別可能なunion型にし、save/deleteだけ対象providerの入力をクリアする。初期化は入力に触れない。設定状態boolean、固定エラー、処理中ボタン無効化、trusted storage gateは維持。
+
+修正後、元のline 40のassertion・入力順序・待ち時間を変更せず、初期化成功/失敗の2ケースと合わせて3 testsがGREEN（exit 0）。さらにsave/delete/failed-saveのそれぞれについて、YouTube→JevとJev→YouTubeの両方向で対象だけをクリアし、別providerの未送信下書きを保持する回帰を追加した。
+
+現在のローカル差分はoptions UI・追加E2E・README・この記録のみ。background、credential-store、message契約、権限、#3向け内部APIは変更していない。修正後のCI成功はまだ確認していない。commit/pushとCI再実行確認は親担当。
+
+## 最終実行結果（上記UI修正後のローカル）
 
 全てbare commandで実行し、以下のexit statusを確認。
 
 | command | 結果 |
 | --- | --- |
-| `npm ci` | exit 0、45 packages追加、0 vulnerabilities。esbuild install-scriptのallowScripts未承認に関するnpm warningあり |
+| `npm ci`（初回実装時） | exit 0、45 packages追加、0 vulnerabilities。esbuild install-scriptのallowScripts未承認に関するnpm warningあり |
 | `npm run test`（check/package内でも実行） | exit 0、5 test files / 11 tests成功 |
 | `npm run typecheck` | exit 0 |
 | `npm run build`（test:e2e内でも実行） | exit 0、7配布ファイル生成 |
-| `npm run test:e2e` | exit 0、実Chromiumの5 tests成功 |
+| `npm run test:e2e`（今回package内） | exit 0、実Chromiumの10 tests成功 |
 | `npm run check` | exit 0、unit → typecheck → build → E2E成功 |
 | `npm run package` | exit 0、同じ全検証成功後zip生成 |
+| `npx playwright test --repeat-each=3 --retries=0` | exit 0、10 testsを各3回実行し30成功。retryなし |
 | `git diff --check` | exit 0 |
 
-生成物: `/home/ryusei/private/agent_moderator-worktrees/issue-2/artifacts/agent-moderator.zip`（4,324 bytes）。実zipを読み取って下記7エントリのみであることを確認した。テスト/fixture/一時拡張/プロファイルは配布物に含まれない。
+生成物: `/home/ryusei/private/agent_moderator-worktrees/issue-2/artifacts/agent-moderator.zip`（4,333 bytes）。実zipを読み取って下記7エントリのみであることを確認した。テスト/fixture/一時拡張/プロファイルは配布物に含まれない。
 
 - background.js
 - content.js
