@@ -1,6 +1,8 @@
 # Agent Moderator
 
-YouTube Live向けChrome拡張機能です。MV3基盤、利用者自身のAPIキー管理、YouTube公式APIからのライブチャット継続取得、明示有効化したJev評価に対応します。投稿者単位のローカル非表示（Issue #5）は未実装です。BAN・投稿/削除は対象外です。Jevの契約・業務ルール・送信範囲・検証境界は [docs/jev-moderation.md](docs/jev-moderation.md) を参照してください。
+YouTube Live向けChrome拡張機能です。MV3基盤、利用者自身のAPIキー管理、YouTube公式APIからのライブチャット継続取得、明示有効化したJev評価、配信別の投稿者ローカル非表示・一覧確認・解除に対応します。BAN・投稿/削除は対象外です。Jevの契約・業務ルール・送信範囲は [docs/jev-moderation.md](docs/jev-moderation.md)、非表示の技術契約・対応範囲は [docs/local-author-filter.md](docs/local-author-filter.md)、#5の検証根拠は [docs/verification/issue-5.md](docs/verification/issue-5.md) を参照してください。
+
+実YouTube Data API・実Jevへの接続は未検証です。YouTubeの派生データ・表示変更・30日保持等の利用条件との適合も確認中で、実API利用・公開配布を許可済みとは扱いません。以下の導入・操作手順は技術上の手順であり、その承認を意味しません。保存期間や判定数値を規約調査の推測で変更していません。
 
 ## 技術選定
 
@@ -33,7 +35,7 @@ CIはNode.js 24 / Ubuntuで同じpackageコマンドを実行します。CIに�
 6. 変更後はbuildし、拡張一覧で再読み込みする。
 
 WSLの場合はWindowsから参照できるdistディレクトリを選びます。
-自動E2Eは専用の一時プロファイルを使い、通常プロファイルを変更しません。実Chromiumでキー管理、未送信入力保持、content/external sender拒否を確認します。YouTube取得はproduction distとCDP actionによるactiveTab許可、非activeタブで開く同一production popupを使い、monitor/background/credential-storeを通してAPI fixtureで継続・停止・エラー・動画遷移を確認します。詳細な検証境界はdocs/youtube-chat.mdに記録します。OSのツールバークリック、通常Chromeの手動操作、実ライブ配信、実キー/実API通信は未検証です。
+自動E2Eは専用の一時プロファイルを使い、通常プロファイルを変更しません。実Chromiumでキー管理、未送信入力保持、content/external sender拒否を確認します。YouTube取得はproduction distとCDP action、非activeタブで開く同一production popupを使い、monitor/background/credential-storeを通してAPI fixtureで継続・停止・エラー・動画遷移を確認します。#5は公式取得fixture→Jev fixture→非表示登録→iframe/popoutの既存・新着非表示→一覧解除・復元、ブラウザ再起動後の保持も確認しました。別途、実YouTube DOMにproduction distを読み、観測したchannel IDのlocal seedと実monitor UI解除でdisplayの変化を確認しています。これはAPI経由の登録成功ではありません。OSのツールバークリック、通常Windows Chromeの手動操作、実キー/実API通信は未検証です。
 
 ## キーの設定と保護範囲
 
@@ -50,13 +52,16 @@ WSLの場合はWindowsから参照できるdistディレクトリを選びます
 2. そのタブで拡張アイコンを押し、「この動画のチャットを取得」を押す（activeTabによる一時アクセス）。
 3. 開いたmonitorページの「取得を開始」を押す。取得内容・投稿者ID・状態を確認できる。
 4. YouTube視聴タブを前面に戻しても継続する。裏のmonitorはChromeのtimer throttlingにより取得が遅れる場合があるが、API指定間隔より早く要求しない。
-5. 明示停止、monitorページを閉じる/離れる、視聴動画の遷移/タブclose、キー変更/削除で停止する。キー変更後は明示再開、別動画はpopupから選び直す。
+5. 明示停止、monitorページを閉じる/離れる、視聴動画の遷移/タブclose、キー変更/削除で取得・判定を停止する。キー変更後は明示再開、別動画はpopupから選び直す。登録済み投稿者の既存・新着非表示は、監視停止やキー削除では解除しない。
+6. monitorの「この配信の非表示投稿者」で対象video IDの一覧を確認し、「非表示を解除」でその配信の既存・新着へ反映する。反映はcontentの定期更新に従い、非activeタブでは遅れる場合がある。
+
+非表示リストはvideo IDごとにchrome.storage.localへ端末内永続保存し、syncは使いません。worker/browser再起動を跨いで維持します。解除前に保持していた同じ判定・遅延結果の即再登録をrevisionで防ぎ、解除後に新しく観測した悪質投稿は再登録できます。解除は非表示IDを一覧から除く操作であり、当該video/authorのrevision metadataはlocalに残ります。worker再起動を跨ぐmessage IDの重複排除は永続化していません。詳細は#5技術文書を参照してください。
 
 Jev評価を使う場合はJevキーも設定し、monitorの「Jev判定を有効化・再開」を押してください。未有効化では外部送信しません。有効化後に取得した新着だけを1件ずつ評価し、項目別評価値・悪質の理由・未判定/判定失敗を表示します。いずれかのnoul評価値 >= 0.8、または同一投稿者の10秒以内10件以上の重複しない投稿で悪質と判定します。ネタバレは対象外です。投稿時刻欠落/不正では時間条件の判定不能を表示します。連投判定はJev通信とは独立です。Jevエラーでは外部通信だけを停止し自動retryせず、明示再開もRetry-Afterを守ります。取得停止ではJevも停止します。失われた本文や履歴を追加APIで再取得しません。実モデル速度・精度・prompt injection耐性は未検証です。
 
-取得元はvideos.listとliveChatMessages.listのみ。初回取得は直近の一部であり全履歴ではありません。nextPageToken継承・pollingIntervalMillis遵守・重複ID防止を行い、quota/auth/network/不正応答等では自動再試行しません。明示再開もcooldown/Retry-Afterを守ります。filter/非表示/BAN機能ではありません。
+取得元はvideos.listとliveChatMessages.listのみ。初回取得は直近の一部であり全履歴ではありません。nextPageToken継承・pollingIntervalMillis遵守・重複ID防止を行い、quota/auth/network/不正応答等では自動再試行しません。明示再開もcooldown/Retry-Afterを守ります。非表示対象はJevのmalicious=true、または既取得コメントによるローカル連投の確定結果です。判定待ちは見せたままです。DOMは投稿者IDと表示制御にだけ使い、コメント取得・判定をスクレイピングへ置き換えません。
 
-対象bindingの生成・削除・liveChatId更新は共通の状態排他と世代で保護し、古いイベントや取得結果による新対象の削除・旧対象の復活を防ぎます。進行中要求のAbortは状態排他やAPI応答待ちより先に行います。monitorの初期statusも変更通知で世代を失効させ、遅い初期応答で開始可能状態へ戻しません。Issue #3時点の限定race修正後のローカルpackage検証はunit 80件／実Chromium E2E 16件成功でした。Issue #4を含む最新の検証結果は [docs/verification/issue-4.md](docs/verification/issue-4.md) を参照してください。実APIは未確認のままです。
+対象bindingの生成・削除・liveChatId更新は共通の状態排他と世代で保護し、古いイベントや取得結果による新対象の削除・旧対象の復活を防ぎます。進行中要求のAbortは状態排他やAPI応答待ちより先に行います。monitorの初期statusも変更通知で世代を失効させ、遅い初期応答で開始可能状態へ戻しません。#5では取得要求が捕捉したcollection世代も照合し、停止後の遅延YouTube応答を新規非表示登録に使いません。#3/#4の検証記録は各技術・検証文書、#5を含む全回帰は [docs/verification/issue-5.md](docs/verification/issue-5.md) を参照してください。実APIは未確認のままです。
 
 ## 後続Issue向け内部API契約
 
@@ -77,25 +82,29 @@ Jev評価を使う場合はJevキーも設定し、monitorの「Jev判定を有�
 - `public/manifest.json`: MV3宣言・入口・CSP。
 - `public/options.html`, `src/options.ts`: パスワード入力・設定状態表示・個別保存/削除。
 - `public/popup.html`, `src/popup.ts`: activeTabによる視聴動画の選択と設定リンク。
-- `public/monitor.html`, `src/monitor.ts`: 開いている間の継続取得・本文/投稿者表示・明示開始/停止。
-- `src/background.ts`: storage初期化・設定handler・monitor専用一回取得handler・キー/動画変更時の停止。
+- `src/monitor.ts`: 開いている間の継続取得・本文/投稿者表示・明示開始/停止・対象配信の非表示一覧と解除。
+- `src/background.ts`: storage初期化・設定handler・monitor専用一回取得handler・キー/動画変更時の停止・非表示store/IPCの接続。
 - `src/youtube/`: 固定endpoint API client、継続core、trusted取得handler、IPC transport、動画ID境界。
 - `src/jev/`: Jev client、固定noul rubricと純粋policy、必要文脈だけの履歴、直列評価調整、IPC transport、monitor評価UI。
 - `src/credential-store.ts`: 初期化gate、local保存とprovider別background内部読取API。
 - `src/extension-runtime.ts`: 利用するChrome runtime APIの最小型境界。
-- `src/content.ts`: チャットフレーム入口。現時点では副作用なし。
-- `scripts/build.mjs`: dist生成。`scripts/package.mjs`: 明示した9ファイルのみzip化。fixture/キー/ソースは含めない。
+- `src/hidden-authors/`: 配信別local store、解除revision、sender/video境界、monitor一覧・解除。
+- `src/content-ids.ts`: MAINの最小IDブリッジ。本文・キー・非表示リストは扱わない。
+- `src/content.ts`: isolated側の対象videoのIDs取得、既存/新着/再利用rendererの非表示と復元。
+- `scripts/build.mjs`: dist生成。`scripts/package.mjs`: 明示した10ファイルのみzip化。fixture/キー/ソースは含めない。
 - `tests/`: manifest・配布契約。`e2e/`: 実ブラウザ検証。
 - `docs/verification/summary.md`: Issue #1の検証記録。`docs/verification/issue-2.md`: キー管理の縦RED→GREEN・実ブラウザ・最終検証。生ログはGit対象外。
 
 ## 最小権限とYouTube iframe方針
 
-`permissions` は `storage` と `activeTab`。`host_permissions` はYouTube Data API取得用の `https://www.googleapis.com/*` とJev用の `https://api.typesafe.ai/*` に限定します。tabs/scripting/offscreen/全サイトアクセス権限は追加しません。activeTabはユーザーが拡張を呼び出した視聴タブに一時的なアクセスを与えます。静的content_scriptsは従来のチャットURL限定で、副作用はありません。
+`permissions` は `storage` と `activeTab`。`host_permissions` はYouTube Data API取得用の `https://www.googleapis.com/*`、Jev用の `https://api.typesafe.ai/*`、非表示の対象動画照合用の `https://www.youtube.com/*` です。#5の追加YouTube権限は、activeTab許可がないpopout・ブラウザ再起動後にもbackgroundで現在のタブURLを照合するために必要です。host permissionのpathでチャットだけに制限できると扱わず、YouTube origin全体への権限であることを明示します。tabs/scripting/offscreen/全サイトアクセス権限は追加していません。
 
-チャットはwatchページ内の別フレームなので `all_frames: true` とし、各フレームのURLがmatchesに合う場合だけ注入します。watchページ、他サイト、about:blankへcontentを注入しません。content入口は何もしません。取得中の視聴動画変更はbackgroundのtabs.onUpdatedと各要求時のtabs.get照合で検出し、停止/再選択を促します。DOM取得/非表示は後続Issueです。
+チャットはwatchページ内の別フレームなので `all_frames: true` とし、各フレームのURLがmatchesに合う場合だけMAIN/isolatedのcontentを注入します。watchページ、他サイト、about:blankへcontentを注入しません。通常watchのiframeはreferrerのvideo IDとbackgroundの現在タブURL、popoutはURLのvと現在タブURLを照合します。continuationを推測decodeしません。取得中の視聴動画変更はbackgroundのtabs.onUpdatedと各要求時のtabs.get照合で検出し、停止/再選択を促します。
+
+MAINのrenderer.data.authorExternalChannelIdに依存するため、YouTube DOM変更・MAIN側の識別不能・非対応rendererでは非表示を保証せず、表示名/handleから推測せず表示を残します（未識別rendererのfail-open）。既識別情報をMAIN停止時に一斉破棄する仕組みではありません。replayは注入matchesに含まれていても、実処理のURL境界は/live_chatのみなので非表示未対応です。実DOMで確認したのはtext-message rendererで、paid-message/paid-sticker/membershipのselectorは実装にあるものの実YouTube上の動作は未検証です。
 
 ## 秘密保護・対象外
 
-実キーは参照・出力・同梱しません。テストはsyntheticダミーと明示fixtureだけを使います。`.env*`、鍵ファイル、node_modules、生成物、ブラウザプロファイルはGit対象外です。distにはpublic固定資産とbundleだけを生成し、zipは明示allowlistに限定します。非表示、BAN・削除・投稿、モデレーター権限、Twitchは対象外です。Issue #4の検証記録は [docs/verification/issue-4.md](docs/verification/issue-4.md) にあります。
+実キーは参照・出力・同梱しません。自動テストはsyntheticダミーと明示fixture、実DOM検証は観測済みchannel IDの隔離local seedだけを使います。`.env*`、鍵ファイル、node_modules、生成物、ブラウザプロファイルはGit対象外です。distにはpublic固定資産とbundleだけを生成し、zipは明示allowlistに限定します。BAN・削除・投稿、モデレーター権限、Twitchは対象外です。実API接続・利用条件適合・公開配布の承認は保留です。Issue #4の検証記録は [docs/verification/issue-4.md](docs/verification/issue-4.md)、#5は [docs/verification/issue-5.md](docs/verification/issue-5.md) にあります。
 
 commit/push/PRとCI確認は親担当です。このworktreeの子担当は編集・検証・報告のみを行います。

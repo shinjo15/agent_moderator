@@ -26,10 +26,13 @@ export function createModeration({ client, readKey, session, now = Date.now }: {
   function reset() { stop(); history.clear(); records.clear(); }
   function stopCollection() { stop(); history.clearBodies(); }
   function observe(messages: ChatMessage[]) {
+    const bursts: ChatMessage[] = [];
     for (const message of messages) {
       const context = history.add(message);
       if (context) records.set(message.id, { authorChannelId: message.authorChannelId, burst: context.burst, allowed: enabled });
+      if (context?.burst === 'confirmed') bursts.push(message);
     }
+    return bursts;
   }
   async function enable() {
     const current = generation;

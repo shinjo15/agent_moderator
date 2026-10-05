@@ -1,14 +1,20 @@
 {
   "manifest_version": 3,
   "name": "Agent Moderator",
-  "description": "YouTube Live向け拡張機能の開発基盤。フィルター機能は未実装です。",
+  "description": "YouTube Liveのコメント取得・評価と、配信別の投稿者ローカル非表示・解除を行う拡張機能です。",
   "version": "0.1.0",
   "permissions": ["storage", "activeTab"],
-  "host_permissions": ["https://www.googleapis.com/*", "https://api.typesafe.ai/*"],
+  "host_permissions": ["https://www.googleapis.com/*", "https://api.typesafe.ai/*", "https://www.youtube.com/*"],
   "options_ui": { "page": "options.html", "open_in_tab": true },
   "action": { "default_popup": "popup.html", "default_title": "Agent Moderator" },
   "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [{
+    "matches": ["https://www.youtube.com/live_chat*"],
+    "js": ["content-ids.js"],
+    "all_frames": true,
+    "world": "MAIN",
+    "run_at": "document_start"
+  }, {
     "matches": ["https://www.youtube.com/live_chat*", "https://www.youtube.com/live_chat_replay*"],
     "js": ["content.js"],
     "all_frames": true,

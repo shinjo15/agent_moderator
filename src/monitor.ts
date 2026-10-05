@@ -3,12 +3,13 @@ import { createChatMonitor } from './youtube/monitor';
 import { createRuntimeTransport } from './youtube/runtime-transport';
 import { createModerationTransport } from './jev/runtime-transport';
 import { createJevPanel } from './jev/monitor';
+import { createHiddenAuthorPanel } from './hidden-authors/monitor';
 
 const main = document.querySelector('main')!;
 const heading = document.createElement('h1');
 heading.textContent = 'YouTubeライブチャット取得';
 const notice = document.createElement('p');
-notice.textContent = 'このページを開いている間、YouTube視聴タブが前面でも取得を継続します。裏のタブではブラウザにより取得が遅くなる場合があります。ページを閉じると停止します。初回取得は過去全履歴を保証しません。非表示・BANは行いません。';
+notice.textContent = 'このページを開いている間、YouTube視聴タブが前面でも取得を継続します。裏のタブではブラウザにより取得が遅くなる場合があります。ページを閉じると取得・判定が停止しますが、登録済み投稿者の既存・新着の非表示は継続します。初回取得は過去全履歴を保証しません。BAN・投稿削除は行いません。';
 const target = document.createElement('p');
 const status = document.createElement('p');
 status.setAttribute('role', 'status');
@@ -22,6 +23,7 @@ const messages = document.createElement('ol');
 messages.id = 'messages';
 main.append(heading, notice, target, start, stop, settings, status, messages);
 const jev = createJevPanel(main, createModerationTransport(runtime));
+const hidden = createHiddenAuthorPanel(main, runtime);
 // Reload never inherits the previous page's opt-in or body context.
 void createModerationTransport(runtime).stop(true);
 let available = false;
@@ -57,6 +59,7 @@ runtime.onMessage.addListener((message, sender) => {
     status.textContent = available ? 'YouTubeキーが変更されたため停止しました。明示的に再開してください。' : 'YouTubeキーが未設定のため停止しました。設定してください。';
   }
   if (message.type === 'youtube.targetChanged') {
+    hidden.setVideo(undefined);
     jev.stop(); jev.setTarget(false);
     initializationGeneration++;
     validTarget = false;
@@ -79,6 +82,7 @@ void (async () => {
     validTarget = true;
     available = response.value.credentialsAvailable;
     target.textContent = `対象動画: ${response.value.videoId}`;
+    hidden.setVideo(response.value.videoId);
     monitor.setVideo(response.value.videoId);
     monitor.credentialsChanged(available);
     jev.setTarget(true);
