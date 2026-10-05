@@ -9,7 +9,7 @@ const failures: Record<JevError['code'], string> = {
 export function createJevPanel(main: HTMLElement, transport: ReturnType<typeof createModerationTransport>) {
   const section = document.createElement('section');
   const notice = document.createElement('p');
-  notice.textContent = 'Jev判定は明示有効化した後の新着のみ。取得済みの同一投稿者の直近60秒以内、対象を含め最大20件の本文と投稿時刻のみをJevへ送信します。ID・他の投稿者・キーは投稿データに含めません。Jev利用料は利用者負担です。1件ずつ全項目を1回で評価し、自動再試行しません。非表示・BANは行いません。連投は取得済み投稿時刻からアプリで判定します。';
+  notice.textContent = 'Jev判定は明示有効化した後の新着のみ。取得済みの同一投稿者の直近60秒以内、対象を含め最大20件の本文と投稿時刻のみをJevへ送信します。ID・他の投稿者・キーは投稿データに含めません。Jev利用料は利用者負担です。1件ずつ全項目を1回で評価し、自動再試行しません。悪質と確定した投稿者をこの配信でローカル非表示にします。BAN・投稿削除は行いません。連投は取得済み投稿時刻からアプリで判定します。';
   const enable = document.createElement('button'); enable.textContent = 'Jev判定を有効化・再開'; enable.disabled = true;
   const disable = document.createElement('button'); disable.textContent = 'Jev判定を停止'; disable.disabled = true;
   const status = document.createElement('p'); status.dataset.testid = 'jev-status'; status.setAttribute('aria-live', 'polite'); status.textContent = 'Jev未有効化：外部送信しません。';

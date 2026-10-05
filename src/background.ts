@@ -5,10 +5,14 @@ import { createYouTubeHandler } from './youtube/background-handler';
 import { platform } from './youtube/extension-platform';
 import { createJevClient } from './jev/client';
 import { createModeration } from './jev/moderation';
+import { createHiddenAuthors } from './hidden-authors/store';
+import { createHiddenAuthorHandler } from './hidden-authors/handler';
 
 const moderation = createModeration({ client: createJevClient(), readKey: readJevApiKeyForBackground, session: platform.storage.session });
+const hiddenAuthors = createHiddenAuthors({ storage: platform.storage.local, initialize: initializeCredentialStorage });
+const hidden = createHiddenAuthorHandler({ store: hiddenAuthors, tabs: platform.tabs, session: platform.storage.session, runtime });
 const youtube = createYouTubeHandler({ session: platform.storage.session, tabs: platform.tabs, runtime, moderation,
-  client: createYouTubeClient(), initialize: initializeCredentialStorage, readApiKey: readYouTubeApiKeyForBackground });
+  hiddenAuthors, client: createYouTubeClient(), initialize: initializeCredentialStorage, readApiKey: readYouTubeApiKeyForBackground });
 platform.storage.onChanged?.addListener((changes, area) => {
   if (area === 'local' && 'apiKey.youtube' in changes) void youtube.credentialsChanged().catch(() => {});
   if (area === 'local' && 'apiKey.jev' in changes) {
@@ -32,6 +36,9 @@ runtime.onMessageExternal.addListener((_message, _sender, reply) => {
 });
 
 runtime.onMessage.addListener((message, sender, reply) => {
+  if (typeof message === 'object' && message !== null && 'type' in message && typeof message.type === 'string' && message.type.startsWith('hidden.')) {
+    void hidden.handle(message, sender).then(reply); return true;
+  }
   if (typeof message === 'object' && message !== null && 'type' in message &&
       typeof message.type === 'string' && (message.type.startsWith('youtube.') || message.type.startsWith('jev.'))) {
     void youtube.handle(message, sender).then(reply);

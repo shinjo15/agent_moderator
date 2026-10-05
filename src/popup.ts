@@ -5,7 +5,7 @@ import { videoIdFromUrl } from './youtube/video-id';
 const heading = document.createElement('h1');
 heading.textContent = 'Agent Moderator';
 const notice = document.createElement('p');
-notice.textContent = 'フィルター機能は未実装です。';
+notice.textContent = '配信別に投稿者を画面内で非表示にします。監視停止後も非表示は維持され、monitorから解除できます。YouTube上でのBAN・コメント削除は行いません。';
 const settings = document.createElement('a');
 settings.textContent = '設定を開く';
 settings.href = 'options.html';
