@@ -29,6 +29,7 @@ test('実際のMV3拡張を読み込み、設定・popup・設定リンクを開
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(`chrome-extension://${extensionId}/${manifest.options_ui.page}`);
     await expect(page.getByRole('heading', { name: 'Agent Moderator 設定' })).toBeVisible();
+    await expect(page.getByText('配信別に投稿者を画面内で非表示にします。監視停止後も非表示は維持され、monitorから解除できます。YouTube上でのBAN・コメント削除は行いません。', { exact: false })).toBeVisible();
     await expect(page.getByLabel('Jev APIキー')).toHaveAttribute('type', 'password');
     await expect(page.getByLabel('YouTube APIキー')).toHaveAttribute('type', 'password');
     await expect(page.getByTestId('youtube-status')).toHaveText('未設定：設定が必要です。');
@@ -70,7 +71,7 @@ test('実際のMV3拡張を読み込み、設定・popup・設定リンクを開
     await expect(page.getByTestId('jev-status')).toHaveText('未設定：設定が必要です。');
     await page.goto(`chrome-extension://${extensionId}/${manifest.action.default_popup}`);
     await expect(page.getByRole('heading', { name: 'Agent Moderator', exact: true })).toBeVisible();
-    await expect(page.getByText('フィルター機能は未実装です。')).toBeVisible();
+    await expect(page.getByText('配信別に投稿者を画面内で非表示にします。監視停止後も非表示は維持され、monitorから解除できます。YouTube上でのBAN・コメント削除は行いません。')).toBeVisible();
     await page.getByRole('link', { name: '設定を開く' }).click();
     await expect(page.getByRole('heading', { name: 'Agent Moderator 設定' })).toBeVisible();
     expect(errors).toEqual([]);
