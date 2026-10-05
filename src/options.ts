@@ -4,7 +4,7 @@ import type { ApiKeyProvider, CredentialStatus } from './credential-store';
 const heading = document.createElement('h1');
 heading.textContent = 'Agent Moderator 設定';
 const notice = document.createElement('p');
-notice.textContent = 'キーはこの端末のchrome.storage.localだけに保存します。同期しません。ローカル保存は秘密保管庫ではなく、端末やブラウザプロファイルへアクセスできる人からは保護できません。今後フィルターを利用するとコメントをJevへ送信し、Jev利用料とYouTube APIクォータは利用者が負担します。この版では外部API通信・接続確認は行いません。空欄で保存すると既存キーを保持します。';
+notice.textContent = 'キーはこの端末のchrome.storage.localだけに保存します。同期しません。ローカル保存は秘密保管庫ではなく、端末やブラウザプロファイルへアクセスできる人からは保護できません。この版では取得開始時にYouTube APIへ通信し、YouTube APIクォータは利用者が負担します。Jevへコメントは送信せず、AI判定・非表示・BANは行いません。保存だけでは接続確認を行わず、設定済み表示はキーの有効性を保証しません。将来Jev判定を利用するとJev利用料も発生します。空欄で保存すると既存キーを保持します。';
 const result = document.createElement('p');
 result.setAttribute('role', 'status');
 const main = document.querySelector('main')!;

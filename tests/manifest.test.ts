@@ -9,8 +9,8 @@ describe('MV3基盤', () => {
     expect(manifest.options_ui).toEqual({ page: 'options.html', open_in_tab: true });
     expect(manifest.action.default_popup).toBe('popup.html');
     expect(manifest.background).toEqual({ service_worker: 'background.js', type: 'module' });
-    expect(manifest.permissions).toEqual(['storage']);
-    expect(manifest.host_permissions ?? []).toEqual([]);
+    expect(manifest.permissions).toEqual(['storage', 'activeTab']);
+    expect(manifest.host_permissions).toEqual(['https://www.googleapis.com/*']);
     expect(manifest.content_scripts).toEqual([{
       matches: ['https://www.youtube.com/live_chat*', 'https://www.youtube.com/live_chat_replay*'],
       js: ['content.js'], all_frames: true, run_at: 'document_idle',
