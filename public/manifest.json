@@ -4,7 +4,7 @@
   "description": "YouTube Live向け拡張機能の開発基盤。フィルター機能は未実装です。",
   "version": "0.1.0",
   "permissions": ["storage", "activeTab"],
-  "host_permissions": ["https://www.googleapis.com/*"],
+  "host_permissions": ["https://www.googleapis.com/*", "https://api.typesafe.ai/*"],
   "options_ui": { "page": "options.html", "open_in_tab": true },
   "action": { "default_popup": "popup.html", "default_title": "Agent Moderator" },
   "background": { "service_worker": "background.js", "type": "module" },

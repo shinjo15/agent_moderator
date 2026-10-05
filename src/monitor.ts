@@ -1,12 +1,14 @@
 import { runtime } from './extension-runtime';
 import { createChatMonitor } from './youtube/monitor';
 import { createRuntimeTransport } from './youtube/runtime-transport';
+import { createModerationTransport } from './jev/runtime-transport';
+import { createJevPanel } from './jev/monitor';
 
 const main = document.querySelector('main')!;
 const heading = document.createElement('h1');
 heading.textContent = 'YouTubeライブチャット取得';
 const notice = document.createElement('p');
-notice.textContent = 'このページを開いている間、YouTube視聴タブが前面でも取得を継続します。裏のタブではブラウザにより取得が遅くなる場合があります。ページを閉じると停止します。初回取得は過去全履歴を保証しません。Jev判定・非表示・BANは行いません。';
+notice.textContent = 'このページを開いている間、YouTube視聴タブが前面でも取得を継続します。裏のタブではブラウザにより取得が遅くなる場合があります。ページを閉じると停止します。初回取得は過去全履歴を保証しません。非表示・BANは行いません。';
 const target = document.createElement('p');
 const status = document.createElement('p');
 status.setAttribute('role', 'status');
@@ -19,6 +21,9 @@ settings.href = 'options.html'; settings.target = '_blank'; settings.textContent
 const messages = document.createElement('ol');
 messages.id = 'messages';
 main.append(heading, notice, target, start, stop, settings, status, messages);
+const jev = createJevPanel(main, createModerationTransport(runtime));
+// Reload never inherits the previous page's opt-in or body context.
+void createModerationTransport(runtime).stop(true);
 let available = false;
 let validTarget = false;
 let initializationGeneration = 0;
@@ -28,6 +33,7 @@ const monitor = createChatMonitor({ transport: createRuntimeTransport(),
       const item = document.createElement('li');
       item.textContent = `${message.authorChannelId}: ${message.text}`;
       messages.append(item);
+      jev.add(message.id, message.authorChannelId, item);
     }
   },
   onState: state => {
@@ -37,25 +43,28 @@ const monitor = createChatMonitor({ transport: createRuntimeTransport(),
   },
 });
 start.addEventListener('click', () => monitor.start());
-stop.addEventListener('click', () => monitor.stop());
+stop.addEventListener('click', () => { jev.stop(undefined, true); monitor.stop(); });
 // hiddenだけでは停止しない。YouTube視聴中の継続がこの機能の目的。
-window.addEventListener('pagehide', () => monitor.stop());
+window.addEventListener('pagehide', () => { jev.stop(undefined, true); monitor.stop(); });
 runtime.onMessage.addListener((message, sender) => {
   if (sender.id !== runtime.id || (sender.url !== undefined && sender.url !== runtime.getURL('background.js'))
     || typeof message !== 'object' || message === null || !('type' in message)) return false;
   if (message.type === 'youtube.credentialsChanged' && 'available' in message && typeof message.available === 'boolean') {
+    jev.stop('YouTubeキー変更のためJev判定も停止しました。', true);
     initializationGeneration++;
     available = message.available;
     monitor.credentialsChanged(available);
     status.textContent = available ? 'YouTubeキーが変更されたため停止しました。明示的に再開してください。' : 'YouTubeキーが未設定のため停止しました。設定してください。';
   }
   if (message.type === 'youtube.targetChanged') {
+    jev.stop(); jev.setTarget(false);
     initializationGeneration++;
     validTarget = false;
     monitor.setVideo(undefined);
     start.disabled = true;
     target.textContent = '視聴タブが変更または閉じられました。YouTube視聴タブの拡張ポップアップから選び直してください。';
   }
+  if (message.type === 'jev.credentialsChanged') jev.stop('Jevキー変更・削除のため判定を停止しました。明示再開が必要です。');
   return false;
 });
 void (async () => {
@@ -72,6 +81,7 @@ void (async () => {
     target.textContent = `対象動画: ${response.value.videoId}`;
     monitor.setVideo(response.value.videoId);
     monitor.credentialsChanged(available);
+    jev.setTarget(true);
     status.textContent = available ? '開始ボタンで取得できます。' : 'YouTubeキーが未設定です。設定してください。';
   } catch {
     if (generation !== initializationGeneration) return;

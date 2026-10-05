@@ -1,0 +1,123 @@
+import { expect, it, vi } from 'vitest';
+import { createModeration } from '../src/jev/moderation';
+import { createJevClient } from '../src/jev/client';
+import { apiResponse, chatPost } from './fixtures/jev';
+it('storage変更通知より先にキー差替えを検出しても停止し同IDを再送信しない', async () => {
+  const readKey = vi.fn().mockResolvedValueOnce('synthetic').mockResolvedValueOnce('synthetic').mockResolvedValue('replacement');
+  const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify(apiResponse({ attack: 1 }))));
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey });
+  await moderation.enable(); moderation.observe([chatPost('one'), chatPost('two', 1)]);
+  expect(await moderation.evaluate('one')).toMatchObject({ ok: false, error: { code: 'aborted' } });
+  await moderation.evaluate('one'); await moderation.evaluate('two');
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it.each(['stop', 'reset', 'keyChange'] as const)('%sが応答後のキー再確認中に起きても旧悪質結果を返さない', async action => {
+  let finishRead!: (key: string | undefined) => void;
+  const readKey = vi.fn().mockResolvedValue('synthetic');
+  const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify(apiResponse({ attack: 1 }))));
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey });
+  await moderation.enable(); moderation.observe([chatPost('late')]);
+  readKey.mockResolvedValueOnce('synthetic').mockImplementationOnce(() => new Promise(resolve => { finishRead = resolve; }));
+  const pending = moderation.evaluate('late');
+  await vi.waitFor(() => expect(finishRead).toBeTypeOf('function'));
+  if (action === 'reset') moderation.reset(); else moderation.stop();
+  finishRead(action === 'keyChange' ? 'replacement' : 'synthetic');
+  expect(await pending).toEqual({ ok: false, error: { code: 'aborted' } });
+});
+it('529 RetryAfterはworker再作成/動画再選択でもsessionから継承し本文・キーは永続化しない', async () => {
+  const values: Record<string, unknown> = {};
+  const session = { get: async (keys: string[]) => Object.fromEntries(keys.map(key => [key, values[key]])), set: async (data: Record<string, unknown>) => { Object.assign(values, data); } };
+  const fetcher = vi.fn().mockImplementation(async () => new Response('{}', { status: 529, headers: { 'Retry-After': '60' } }));
+  const deps = { client: createJevClient(fetcher), readKey: async () => 'synthetic', now: () => 0, session };
+  const moderation = createModeration(deps);
+  await moderation.enable(); moderation.observe([chatPost('one')]); await moderation.evaluate('one');
+  moderation.reset();
+  expect(await createModeration(deps).enable()).toMatchObject({ ok: false, error: { code: 'rateLimited', retryAfterMillis: 60000 } });
+  expect(JSON.stringify(values)).not.toMatch(/synthetic|日本語|author|one/);
+});
+it.each([401, 422, 429, 529, 200])('HTTP%iの失敗/不正応答は悪質にも該当なしにもせず停止する', async status => {
+  const fetcher = vi.fn().mockImplementation(async () => new Response('{}', { status }));
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic' });
+  await moderation.enable(); moderation.observe([chatPost('one'), chatPost('two', 1)]);
+  const result = await moderation.evaluate('one');
+  expect(result).toMatchObject({ ok: true, value: { jev: 'failed', reasons: [] } });
+  if (result.ok) expect(result.value.malicious).toBeUndefined();
+  await moderation.evaluate('two'); expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it('並行要求も直列化し同IDは通信しない、停止/キー変更/新sessionの遅延結果を隔離する', async () => {
+  let finish!: (value: Response) => void;
+  const fetcher = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }))
+    .mockImplementation(async () => new Response(JSON.stringify(apiResponse())));
+  const readKey = vi.fn(async () => 'synthetic-jev');
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey });
+  await moderation.enable(); moderation.observe([chatPost('a'), chatPost('b', 1)]);
+  const first = moderation.evaluate('a');
+  const duplicate = moderation.evaluate('a');
+  const second = moderation.evaluate('b');
+  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+  moderation.stop();
+  expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
+  finish(new Response(JSON.stringify(apiResponse({ attack: 1 }))));
+  expect(await first).toMatchObject({ ok: false, error: { code: 'aborted' } });
+  await duplicate; await second;
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  await moderation.enable(); moderation.observe([chatPost('a')]); await moderation.evaluate('a');
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  moderation.reset();
+  await moderation.enable(); moderation.observe([chatPost('a')]);
+  expect(await moderation.evaluate('a')).toMatchObject({ ok: true, value: { malicious: false } });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+it('429 RetryAfterで停止、明示再開も期限前は拒否し自動retryしない', async () => {
+  let now = 0;
+  const fetcher = vi.fn().mockImplementation(async () => new Response('{}', { status: 429, headers: { 'Retry-After': '10' } }));
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic', now: () => now });
+  await moderation.enable(); moderation.observe([chatPost('a'), chatPost('b', 1)]);
+  expect(await moderation.evaluate('a')).toMatchObject({ ok: true, value: { jev: 'failed', error: { code: 'rateLimited' } } });
+  expect(await moderation.evaluate('b')).toMatchObject({ ok: true, value: { jev: 'disabled' } });
+  expect(await moderation.enable()).toMatchObject({ ok: false, error: { code: 'rateLimited', retryAfterMillis: 10000 } });
+  now = 10000;
+  expect(await moderation.enable()).toEqual({ ok: true });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it('連投確定はJev未有効化/失敗とは独立の正の根拠、キーなしで通信しない', async () => {
+  const fetcher = vi.fn();
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => undefined });
+  expect(await moderation.enable()).toMatchObject({ ok: false, error: { code: 'missingKey' } });
+  moderation.observe(Array.from({ length: 10 }, (_, i) => chatPost(`${i}`, i === 9 ? 10000 : i * 1000)));
+  expect(await moderation.evaluate('9')).toMatchObject({ ok: true, value: { malicious: true, reasons: ['burst'], jev: 'disabled', burst: 'confirmed' } });
+  expect(fetcher).not.toHaveBeenCalled();
+});
+it('Jev通信失敗/キー変更/判定だけの停止はローカル連投の時刻根拠を消さない、取得停止は文脈を解放', async () => {
+  const fetcher = vi.fn().mockImplementation(async () => new Response('{}', { status: 401 }));
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic' });
+  await moderation.enable();
+  moderation.observe(Array.from({ length: 9 }, (_, i) => chatPost(`${i}`, i * 1000)));
+  await moderation.evaluate('0'); // Jev failure stops only external evaluation.
+  moderation.stop();
+  moderation.observe([chatPost('9', 10000)]);
+  expect(await moderation.evaluate('9')).toMatchObject({ ok: true, value: { malicious: true, reasons: ['burst'] } });
+  moderation.stopCollection();
+  moderation.observe([chatPost('fresh', 10001)]);
+  expect(await moderation.evaluate('fresh')).toMatchObject({ ok: true, value: { burst: 'notObserved' } });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it('実取得コメントだけを有効化後1件ずつ評価しIDはローカルで対応付ける', async () => {
+  const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify(apiResponse({ attack: 0.8 }))));
+  const readKey = vi.fn(async () => 'synthetic-jev');
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey });
+  moderation.observe([chatPost('one'), chatPost('other', 1, 'other-author')]);
+  expect(await moderation.evaluate('forged')).toMatchObject({ ok: false });
+  expect(await moderation.evaluate('one')).toMatchObject({ ok: true, value: { id: 'one', jev: 'disabled' } });
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(await moderation.enable()).toEqual({ ok: true });
+  moderation.observe([chatPost('two', 1000)]);
+  expect(await moderation.evaluate('two')).toMatchObject({ ok: true, value: { id: 'two', authorChannelId: 'fixture-author', malicious: true, reasons: ['attack'], jev: 'evaluated', burst: 'notObserved' } });
+  const state = JSON.parse(fetcher.mock.calls[0][1].body).state;
+  expect(state).toEqual({ target: { text: '日本語本文two', publishedAt: chatPost('two', 1000).publishedAt }, history: [{ text: '日本語本文one', publishedAt: chatPost('one').publishedAt }] });
+  expect(JSON.stringify(state)).not.toMatch(/author|"id"|synthetic|other/);
+  await moderation.evaluate('two');
+  moderation.observe([chatPost('two', 1000)]);
+  await moderation.evaluate('two');
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});

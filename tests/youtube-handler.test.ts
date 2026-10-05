@@ -1,6 +1,9 @@
 import { expect, it, vi } from 'vitest';
 import { createYouTubeHandler } from '../src/youtube/background-handler';
 import { failure } from '../src/youtube/contracts';
+import { createModeration } from '../src/jev/moderation';
+import { createJevClient } from '../src/jev/client';
+import { apiResponse, chatPost } from './fixtures/jev';
 
 function setup() {
   const values: Record<string, unknown> = {};
@@ -23,12 +26,113 @@ function setup() {
 const popup = { id: 'test', url: 'chrome-extension://test/popup.html' };
 const monitor = { id: 'test', url: 'chrome-extension://test/monitor.html', tab: { id: 10 } };
 const open = { type: 'youtube.openMonitor', tabId: 9, videoId: 'abcdefghijk' };
+it('exact bindingだけがJevを有効化でき実list由来IDのみ評価、本文payloadは禁止', async () => {
+  const { deps, advance } = setup();
+  const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify(apiResponse({ attack: 0.8 }))));
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic-jev' });
+  const handler = createYouTubeHandler({ ...deps, moderation });
+  await handler.handle(open, popup);
+  for (const sender of [popup, { ...monitor, id: 'other' }, { ...monitor, url: `${monitor.url}?fake=1` }, { ...monitor, tab: { id: 11 } }])
+    expect(await handler.handle({ type: 'jev.enable' }, sender)).toEqual(failure('forbidden'));
+  expect(await handler.handle({ type: 'jev.enable' }, monitor)).toEqual({ ok: true });
+  expect(await handler.handle({ type: 'jev.evaluate', id: 'forged' }, monitor)).toMatchObject({ ok: false });
+  await handler.handle({ type: 'youtube.resolve', requestId: 'r1', videoId: open.videoId }, monitor);
+  advance(5000);
+  deps.client.listMessages.mockResolvedValue({ ok: true, value: { messages: [chatPost('actual')], nextPageToken: 'next', pollingIntervalMillis: 8000, ended: false } });
+  await handler.handle({ type: 'youtube.list', requestId: 'r2', liveChatId: 'chat-1' }, monitor);
+  expect(await handler.handle({ type: 'jev.evaluate', id: 'actual', text: 'forged' }, monitor)).toMatchObject({ ok: false });
+  expect(await handler.handle({ type: 'jev.evaluate', id: 'actual' }, monitor)).toMatchObject({ ok: true, value: { id: 'actual', malicious: true } });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  await handler.targetChanged(9);
+  expect(await handler.handle({ type: 'jev.evaluate', id: 'actual' }, monitor)).toMatchObject({ ok: false });
+});
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>(done => { resolve = done; });
   return { promise, resolve };
 }
+
+it.each([
+  ['youtube.status', undefined], ['youtube.status', 'https://www.youtube.com/watch?v=aaaaaaaaaaa'],
+  ['youtube.cancel', undefined], ['youtube.cancel', 'https://www.youtube.com/watch?v=aaaaaaaaaaa'],
+] as const)('旧Aの%s snapshot解放後のAイベント(%s)はBのJev許可・履歴・結果を消さない', async (type, oldUrl) => {
+  const { deps, values, advance } = setup();
+  const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify(apiResponse({ attack: 0.8 }))));
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic-jev' });
+  const handler = createYouTubeHandler({ ...deps, moderation });
+  await handler.handle(open, popup);
+  const readingA = deferred();
+  const releaseA = deferred();
+  deps.session.get.mockImplementationOnce(async keys => {
+    const snapshot = Object.fromEntries(keys.map(key => [key, values[key]]));
+    readingA.resolve();
+    await releaseA.promise;
+    return snapshot;
+  });
+  const oldRequest = handler.handle({ type, requestId: 'old-A-request' }, monitor);
+  await readingA.promise;
+  deps.tabs.get.mockImplementation(async id => ({ id, url: id === 11
+    ? 'https://www.youtube.com/watch?v=zyxwvutsrqp'
+    : id === 9 ? 'https://www.youtube.com/watch?v=abcdefghijk' : monitor.url }));
+  await handler.handle({ ...open, tabId: 11, videoId: 'zyxwvutsrqp' }, popup);
+  expect(await handler.handle({ type: 'jev.enable' }, monitor)).toEqual({ ok: true });
+  await handler.handle({ type: 'youtube.resolve', requestId: 'B-resolve', videoId: 'zyxwvutsrqp' }, monitor);
+  advance(5000);
+  deps.client.listMessages.mockResolvedValue({ ok: true, value: {
+    messages: [chatPost('B-history')], nextPageToken: 'next', pollingIntervalMillis: 8000, ended: false,
+  } });
+  await handler.handle({ type: 'youtube.list', requestId: 'B-first', liveChatId: 'chat-1' }, monitor);
+  const previousResult = await handler.handle({ type: 'jev.evaluate', id: 'B-history' }, monitor);
+  expect(previousResult).toMatchObject({ ok: true, value: { jev: 'evaluated' } });
+  releaseA.resolve();
+  const staleResponse = await oldRequest;
+  deps.runtime.sendMessage.mockClear();
+  await handler.targetChanged(9, oldUrl);
+  expect(deps.runtime.sendMessage).not.toHaveBeenCalled();
+  expect(await handler.handle({ type: 'jev.evaluate', id: 'B-history' }, monitor)).toEqual(previousResult);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  advance(8000);
+  deps.client.listMessages.mockResolvedValue({ ok: true, value: {
+    messages: [chatPost('B-new', 1000)], nextPageToken: 'next-2', pollingIntervalMillis: 8000, ended: false,
+  } });
+  await handler.handle({ type: 'youtube.list', requestId: 'B-next', liveChatId: 'chat-1' }, monitor);
+  expect(await handler.handle({ type: 'jev.evaluate', id: 'B-new' }, monitor)).toMatchObject({ ok: true, value: { jev: 'evaluated' } });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  const body = JSON.parse(fetcher.mock.calls[1][1].body);
+  expect(body.state.history).toEqual([{ text: chatPost('B-history').text, publishedAt: chatPost('B-history').publishedAt }]);
+  expect(staleResponse).toEqual(failure('aborted'));
+});
+
+it('対象照合待ちの古いJev有効化要求は新bindingへ外部送信の許可を持ち越さない', async () => {
+  const { deps } = setup();
+  const readKey = vi.fn(async () => 'synthetic');
+  const moderation = createModeration({ client: createJevClient(vi.fn()), readKey });
+  const handler = createYouTubeHandler({ ...deps, moderation });
+  await handler.handle(open, popup);
+  const checking = deferred(); const finish = deferred<{ id: number; url: string }>();
+  deps.tabs.get.mockImplementationOnce(() => { checking.resolve(); return finish.promise; });
+  const oldEnable = handler.handle({ type: 'jev.enable' }, monitor);
+  await checking.promise;
+  await handler.handle(open, popup);
+  finish.resolve({ id: 9, url: 'https://www.youtube.com/watch?v=abcdefghijk' });
+  expect(await oldEnable).toEqual(failure('aborted'));
+  expect(readKey).not.toHaveBeenCalled();
+});
+it('新binding書込の完了時にもJev世代を切り替え旧monitorから途中で来たenableを失効させる', async () => {
+  const { deps, values } = setup();
+  const moderation = createModeration({ client: createJevClient(vi.fn()), readKey: async () => 'synthetic' });
+  const handler = createYouTubeHandler({ ...deps, moderation });
+  await handler.handle(open, popup);
+  const writing = deferred(); const commit = deferred();
+  deps.session.set.mockImplementationOnce(async data => { writing.resolve(); await commit.promise; Object.assign(values, data); });
+  const newOpen = handler.handle(open, popup);
+  await writing.promise;
+  await handler.handle({ type: 'jev.enable' }, monitor);
+  commit.resolve(); await newOpen;
+  moderation.observe([chatPost('new-session')]);
+  expect(await moderation.evaluate('new-session')).toMatchObject({ ok: true, value: { jev: 'disabled' } });
+});
 
 it.each([11, 9])('新binding書込中の旧対象イベントは新対象tab %iを削除しない', async newTarget => {
   const { handler, deps, values } = setup();
