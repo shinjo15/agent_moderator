@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Agent Moderator",
+  "description": "YouTube Live向け拡張機能の開発基盤。フィルター機能は未実装です。",
+  "version": "0.1.0",
+  "options_ui": { "page": "options.html", "open_in_tab": true },
+  "action": { "default_popup": "popup.html", "default_title": "Agent Moderator" },
+  "background": { "service_worker": "background.js", "type": "module" },
+  "content_scripts": [{
+    "matches": ["https://www.youtube.com/live_chat*", "https://www.youtube.com/live_chat_replay*"],
+    "js": ["content.js"],
+    "all_frames": true,
+    "run_at": "document_idle"
+  }],
+  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'self'" }
+}

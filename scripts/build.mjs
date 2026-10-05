@@ -1,0 +1,11 @@
+import { build } from 'esbuild';
+import { cp, mkdir, rm } from 'node:fs/promises';
+
+await rm('dist', { recursive: true, force: true });
+await mkdir('dist', { recursive: true });
+await cp('public', 'dist', { recursive: true });
+await build({
+  entryPoints: ['src/options.ts', 'src/popup.ts', 'src/background.ts', 'src/content.ts'],
+  outdir: 'dist', bundle: true, format: 'iife', target: 'chrome120',
+  logLevel: 'info',
+});
