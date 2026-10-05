@@ -18,7 +18,7 @@ export const errorMessages = {
 export type ErrorCode = keyof typeof errorMessages;
 export type ChatError = { code: ErrorCode; message: string; retryAfterMillis?: number };
 export type Result<T> = { ok: true; value: T } | { ok: false; error: ChatError };
-export type ChatMessage = { id: string; text: string; authorChannelId: string; type: string };
+export type ChatMessage = { id: string; text: string; authorChannelId: string; type: string; publishedAt?: string };
 export type ChatPage = {
   messages: ChatMessage[];
   nextPageToken: string;

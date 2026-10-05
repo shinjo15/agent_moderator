@@ -120,6 +120,10 @@ test('実contentのisolated contextではlocal読取不可、init/設定/取得�
       localDenied: true,
       responses: Array.from({ length: 4 }, () => ({ ok: false, error: 'この要求は許可されていません。' })),
     });
+    const jevDenied = await cdp.send('Runtime.evaluate', { contextId: world.id, awaitPromise: true, returnByValue: true,
+      expression: `(async () => Promise.all(['jev.enable', 'jev.evaluate', 'jev.disable'].map(type => chrome.runtime.sendMessage({type, id: 'forged'}))))()` });
+    expect(jevDenied.exceptionDetails).toBeUndefined();
+    expect(jevDenied.result.value).toEqual(Array.from({ length: 3 }, () => ({ ok: false, error: { code: 'forbidden', message: 'このチャットへのアクセスが許可されていません。' } })));
     expect(await worker.evaluate(async () => (await chrome.storage.local.get(['apiKey.youtube']))['apiKey.youtube'] === 'synthetic-content-protected')).toBe(true);
     // The ordinary page world has no extension runtime / storage access.
     expect(await page.evaluate(() => {
@@ -195,7 +199,7 @@ test('別拡張機能の実external senderからキーinit/保存/取得/削除�
     const externalWorker = context.serviceWorkers().find(value => value.url().endsWith('/external-worker.js'))!;
     const externalPage = await context.newPage();
     await externalPage.goto(`chrome-extension://${new URL(externalWorker.url()).hostname}/external.html`);
-    for (const type of ['storage.init', 'credentials.get', 'credentials.save', 'credentials.delete']) {
+    for (const type of ['storage.init', 'credentials.get', 'credentials.save', 'credentials.delete', 'jev.enable', 'jev.evaluate', 'jev.disable']) {
       expect(await externalPage.evaluate(({ target, type }) => chrome.runtime.sendMessage(target, {
         type, provider: 'youtube', value: 'synthetic-attacker',
       }), { target: id, type })).toEqual({ ok: false, error: 'この要求は許可されていません。' });

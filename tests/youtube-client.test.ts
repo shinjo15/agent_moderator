@@ -40,6 +40,14 @@ it('HTTP-dateのRetry-Afterを尊重し、不正な値は既定待機へ任せ�
 
 const message = { id: 'msg-1', snippet: { type: 'textMessageEvent', hasDisplayContent: true, displayMessage: 'こんにちは' }, authorDetails: { channelId: 'channel-1' } };
 const chatPage = { nextPageToken: 'next-1', pollingIntervalMillis: 8000, items: [message] };
+it('既存listのpublishedAtを任意に取り込み欠落/不正を捏造しない', async () => {
+  for (const publishedAt of ['2026-01-01T00:00:00Z', undefined, 'invalid']) {
+    const client = createYouTubeClient(vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...chatPage, items: [{ ...message, snippet: { ...message.snippet, publishedAt } }] }))));
+    const result = await client.listMessages('chat', undefined, 'synthetic', new AbortController().signal);
+    expect(result).toMatchObject({ ok: true });
+    if (result.ok) expect(result.value.messages[0].publishedAt).toBe(publishedAt === '2026-01-01T00:00:00Z' ? publishedAt : undefined);
+  }
+});
 
 it.each([
   [403, 'liveChatDisabled', 'chatDisabled'], [403, 'liveChatEnded', 'ended'],

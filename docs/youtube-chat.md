@@ -1,5 +1,7 @@
 # Issue #3: YouTubeライブチャット取得coreと統合契約
 
+この文書の検証件数と対象外の記述はIssue #3時点の記録。Issue #4で追加したJev評価と任意の`ChatMessage.publishedAt`は [jev-moderation.md](jev-moderation.md) を参照。既存fixtureの投稿時刻欠落は引き続き許容し、受信時刻で補完しない。
+
 ## 現在の範囲
 
 #2最新基盤へrebaseして、credential-storeの既存API、trusted background一回取得handler、popupの視聴タブ選択、monitorページを統合済み。キー保管ロジックと#2既存E2Eは変更していない。optionsはYouTube通信があることを説明する文言のみ更新。#4 Jev判定、#5非表示・BAN、モデレーター権限、投稿/削除APIは対象外。

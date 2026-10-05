@@ -1,13 +1,20 @@
-import { deleteApiKey, getCredentialStatus, initializeCredentialStorage, readYouTubeApiKeyForBackground, saveApiKey } from './credential-store';
+import { deleteApiKey, getCredentialStatus, initializeCredentialStorage, readYouTubeApiKeyForBackground, readJevApiKeyForBackground, saveApiKey } from './credential-store';
 import { runtime } from './extension-runtime';
 import { createYouTubeClient } from './youtube/client';
 import { createYouTubeHandler } from './youtube/background-handler';
 import { platform } from './youtube/extension-platform';
+import { createJevClient } from './jev/client';
+import { createModeration } from './jev/moderation';
 
-const youtube = createYouTubeHandler({ session: platform.storage.session, tabs: platform.tabs, runtime,
+const moderation = createModeration({ client: createJevClient(), readKey: readJevApiKeyForBackground, session: platform.storage.session });
+const youtube = createYouTubeHandler({ session: platform.storage.session, tabs: platform.tabs, runtime, moderation,
   client: createYouTubeClient(), initialize: initializeCredentialStorage, readApiKey: readYouTubeApiKeyForBackground });
 platform.storage.onChanged?.addListener((changes, area) => {
   if (area === 'local' && 'apiKey.youtube' in changes) void youtube.credentialsChanged().catch(() => {});
+  if (area === 'local' && 'apiKey.jev' in changes) {
+    moderation.stop();
+    void runtime.sendMessage({ type: 'jev.credentialsChanged' }).catch(() => {});
+  }
 });
 platform.tabs?.onUpdated?.addListener((id, change) => {
   if (change.url !== undefined) void youtube.targetChanged(id, change.url).catch(() => {});
@@ -26,7 +33,7 @@ runtime.onMessageExternal.addListener((_message, _sender, reply) => {
 
 runtime.onMessage.addListener((message, sender, reply) => {
   if (typeof message === 'object' && message !== null && 'type' in message &&
-      typeof message.type === 'string' && message.type.startsWith('youtube.')) {
+      typeof message.type === 'string' && (message.type.startsWith('youtube.') || message.type.startsWith('jev.'))) {
     void youtube.handle(message, sender).then(reply);
     return true;
   }
