@@ -1,6 +1,6 @@
 # プライバシー・送信データ・削除の説明
 
-Issue #6独立作業版。#4までの実装と、未統合の#5合意仕様を区別しています。公開配布向けの最終プライバシーポリシー／同意UIの完成や規約適合性を証明する文書ではありません。[導入手順](onboarding.md) ／ [一次資料と公開前の確認事項](policy-review.md)
+Issue #5統合済みの実装に基づく説明です。公開配布向けの最終プライバシーポリシー／同意UIの完成や規約適合性を証明する文書ではありません。[導入手順](onboarding.md) ／ [非表示の技術契約](local-author-filter.md) ／ [#5検証記録](verification/issue-5.md) ／ [一次資料と公開前の確認事項](policy-review.md)
 
 ## 外部通信と目的
 
@@ -23,7 +23,7 @@ ID欄を除いても本文に氏名、住所、連絡先、攻撃内容等が含
 | 情報 | 保存・保持場所 | 保持／消去 |
 | --- | --- | --- |
 | Jev／YouTube APIキー | 拡張専用 `chrome.storage.local`（trusted contextへ制限） | providerごとの明示削除または拡張削除まで。Chrome同期なし |
-| #5非表示リスト | 合意は配信別videoIDの `chrome.storage.local` | 明示解除まで保持、同期なし。キー削除・取得停止とは独立。具体フィールドと実動作は#5親commit後に確認 |
+| 配信別非表示リスト | 拡張専用 `chrome.storage.local` の `hiddenAuthors.<video ID>` に `{ ids: channel ID[], revisions: authorごとの解除世代 }` | `ids` は明示解除まで保持し同期・自動期限なし。解除後も `revisions` と空recordは残る。キー削除・取得停止では消えない |
 | #4の判定用本文・時刻履歴 | background workerメモリ、動画／monitor binding session単位 | 本文は60秒窓・投稿者ごと最大20件。時刻だけの連投根拠は分離。取得停止・対象変更等で解放。storageへの本文永続化なし |
 | 取得重複ID・評価対応／結果 | monitor／workerメモリ | session／対象変更等で解放。worker終了で失われるものがあり、永続履歴や全配信復元はしない |
 | monitorに表示した本文・評価 | 開いているmonitorのページDOM | ページの表示は判定用60秒窓とは別。取得停止だけで表示済み本文をすべて消す保証ではなく、monitorを閉じる／再読み込みする |
@@ -48,8 +48,8 @@ TypeSafe PrivacyはInputをサービスプロバイダー以外の第三者へ�
 ## 削除・停止はそれぞれ独立
 
 1. Jev送信だけ停止する：monitorの「Jev判定を停止」。YouTube取得は別です。
-2. 取得と判定を停止する：「取得を停止」、monitorを閉じる等。#5合意では非表示と永続リストは維持します。
-3. 非表示を解除／リストを削除する：#5統合後、配信別一覧から対象を明示解除。存在している行の表示を復元します。キーは消しません。具体UIは統合待ちです。
+2. 取得と判定を停止する：「取得を停止」、monitorを閉じる等。登録済みの既存・新着非表示と永続リストは維持します。
+3. 非表示を解除する：対象watch/liveタブをpopupで選び、monitorの「この配信の非表示投稿者」でchannel ID横の「非表示を解除」を押します。存在している行の表示は定期更新で復元します（遅延し得ます）。別配信は選び直します。`ids` から除外しても `revisions` は残り、完全消去や一括削除のUIではありません。キーは消しません。解除後の新しい悪質投稿は再登録され得ます。
 4. キーを拡張内から削除する：設定画面でproviderごとの「キーを削除」。もう一方のキーや非表示リストとは独立です。
 5. 提供元キーを失効する：Google Cloud／TypeSafe Consoleで別途削除・取消・ローテーション。拡張内の削除は提供元での失効ではありません。
 6. 全ローカルデータを削除する：取得停止後、Chrome拡張一覧からアンインストール。Chrome公式ではlocalは拡張削除で消去されます。履歴／キャッシュ消去だけではlocalは消えません。[19]
@@ -59,7 +59,7 @@ TypeSafe PrivacyはInputをサービスプロバイダー以外の第三者へ�
 
 ## 必要権限と公開前の残事項
 
-現在のmanifestは `storage`（キー・制御状態）、`activeTab`（利用者が選ぶ視聴タブ）、Google／TypeSafeの限定API host permissions、YouTubeチャットURL限定content scriptを使います。#5によるcontentの非表示責務・権限の最終説明はそのcommit確認後に確定します。
+現在のmanifestは `storage`（キー・制御状態）、`activeTab`（利用者が選ぶ視聴タブ）、Google／TypeSafe APIと `https://www.youtube.com/*` のhost permissionsを使います。YouTube権限は非表示の際に現在のタブURLをbackgroundで照合するためで、origin全体への権限です。MAIN/isolatedのcontent注入はチャットURL限定（replayは非表示未対応）で、本文取得には使いません。実DOMで非表示・復元を確認したのはtext-messageのみです。[対応範囲](local-author-filter.md)
 
 Chrome Web Storeでは、ローカル保存のみでもユーザーデータの扱いを開示し、プライバシーポリシーを掲載する必要があります。追加の目立つ説明／UI内同意、Limited Useの遵守宣言、Developer Dashboard申告と実装の一致、安全な保存、最小権限を確認する必要があります。Markdownを追加しただけでは申請要件達成ではありません。[8][9][10]
 

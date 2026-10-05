@@ -36,7 +36,7 @@ Jevの悪質性評価値と判定理由はAPI由来コメントからの新し�
 
 > API Clients may temporarily store limited amounts of Non-Authorized Data for as long as is necessary for the purposes of the API Client but not longer than 30 calendar days.
 
-続く文は30日後に削除またはrefreshが必要と記載します。#5合意はvideoID別のリストを解除まで保持します。ユーザーの非表示設定そのものと、その中のAPI由来ID／metadataを分けて確認する必要があります。「全部ユーザー設定だからAPI Dataでない」「localなら対象外」「キー所有者の同意で投稿者のAuthorized Dataになる」と断定しません。30日自動削除・refreshの実装を#6で勝手に足しません。[1]
+続く文は30日後に削除またはrefreshが必要と記載します。#5実装はvideoID別のリストを解除まで保持し、解除後もrevision metadataと空recordが残ります。[実際の保存契約](local-author-filter.md) ユーザーの非表示設定そのものと、その中のAPI由来ID／metadataを分けて確認する必要があります。「全部ユーザー設定だからAPI Dataでない」「localなら対象外」「キー所有者の同意で投稿者のAuthorized Dataになる」と断定しません。30日自動削除・refreshの実装を#6で勝手に足しません。[1]
 
 **III.E.4.g（削除要求）**：利用者がstored data削除を要求したらできる限り早く、7暦日以内に削除する必要があります。拡張側の削除がYouTube側のデータ削除とは違うことも明示する規定です。第三者送信済みデータの削除／保持を含め、公開前に照合する必要があります。[1]
 
@@ -105,7 +105,7 @@ DPAは個人データの処理目的／Documented Instructions／役割と国際
 | Updated Privacy Policy & Secure Handling Requirements — FAQ 3 / 6 / 14 | “even when data is processed or stored locally” でも開示、privacy policy掲載が必要 [8] | localキー／リスト／本文と外部送信を説明。掲載・申請は未実施 |
 | 同FAQ — 9 / 10 | 保存時強固な暗号化の記述、目立つ説明とUI内の具体的同意行為が必要 [8] | 現在のlocalキー保存を暗号化秘密保管庫と偽らない。保存時保護の適合と同意UIを要確認 |
 | Limited Use — 2 / 3 / 5 / 6 | 開示目的へ限定、単一目的に必要な情報、第三者移転・人の閲覧の制限、遵守宣言 [9] | 外部AIが必要な単一目的か、providerの処理／人の閲覧と整合するかを確認。未達の遵守宣言を捏造しない |
-| Use of Permissions — 1 | “Request access to the narrowest permissions necessary” [10] | 最小permissionとhost／content matchの理由を#5確定manifestへ照合。将来用の権限を加えない |
+| Use of Permissions — 1 | “Request access to the narrowest permissions necessary” [10] | 現行manifestは `storage`、`activeTab`、Google／TypeSafe APIおよび `https://www.youtube.com/*` のhost permission。YouTube origin全体への権限は現在タブURL照合用であり、chat pathだけへの権限制限ではない。MAIN/isolated注入はchat URL限定。[#5契約](local-author-filter.md)。この構成の規約適合は未確認 |
 | Handling Requirements — 2 / 4 | modern cryptographyでの通信、認証情報を安全にし公開しない [18] | 固定HTTPSとキー非表示／非同梱。local保存だけで全要件完了とは扱わない |
 
 ## 親が判断／確認する残事項（未達）

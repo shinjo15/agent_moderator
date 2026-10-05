@@ -1,6 +1,6 @@
 # Agent Moderator
 
-初めて使う方は [日本語導入手順](docs/onboarding.md)、[プライバシー・削除](docs/privacy.md)、[公式一次資料・公開前の保留条件](docs/policy-review.md) を参照してください。独自バックエンド不要でもGoogle / TypeSafeへの外部通信は必要です。実施済みと未実施は [Issue #6の検証記録](docs/verification/issue-6.md) で区別しています。
+初めて使う方は [日本語導入手順](docs/onboarding.md)、[プライバシー・削除](docs/privacy.md)、[公式一次資料・公開前の保留条件](docs/policy-review.md) を参照してください。独自バックエンド不要でもGoogle / TypeSafeへの外部通信は必要です。#5の実装・実DOMの範囲は [Issue #5の検証記録](docs/verification/issue-5.md)、#6の文書統合と今回の検証は [Issue #6の検証記録](docs/verification/issue-6.md) で区別しています。
 
 YouTube Live向けChrome拡張機能です。MV3基盤、利用者自身のAPIキー管理、YouTube公式APIからのライブチャット継続取得、明示有効化したJev評価、配信別の投稿者ローカル非表示・一覧確認・解除に対応します。BAN・投稿/削除は対象外です。Jevの契約・業務ルール・送信範囲は [docs/jev-moderation.md](docs/jev-moderation.md)、非表示の技術契約・対応範囲は [docs/local-author-filter.md](docs/local-author-filter.md)、#5の検証根拠は [docs/verification/issue-5.md](docs/verification/issue-5.md) を参照してください。
 
