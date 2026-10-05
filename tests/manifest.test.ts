@@ -9,7 +9,7 @@ describe('MV3基盤', () => {
     expect(manifest.options_ui).toEqual({ page: 'options.html', open_in_tab: true });
     expect(manifest.action.default_popup).toBe('popup.html');
     expect(manifest.background).toEqual({ service_worker: 'background.js', type: 'module' });
-    expect(manifest.permissions ?? []).toEqual([]);
+    expect(manifest.permissions).toEqual(['storage']);
     expect(manifest.host_permissions ?? []).toEqual([]);
     expect(manifest.content_scripts).toEqual([{
       matches: ['https://www.youtube.com/live_chat*', 'https://www.youtube.com/live_chat_replay*'],
