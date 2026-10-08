@@ -75,6 +75,42 @@ it('旧世代429は新世代を直接停止せず通信直前にcooldownを抑�
     moderation.reset();
   } finally { vi.useRealTimers(); }
 });
+it('新評価開始時の閾値snapshotをin-flight/cachedに保持しqueued次評価だけ新設定を使う', async () => {
+  let threshold = 0.65;
+  let finish!: (value: Response) => void;
+  const fetcher = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }))
+    .mockImplementation(async () => new Response(JSON.stringify(apiResponse({ attack: 0.7 }))));
+  const readThreshold = vi.fn(async () => threshold);
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic', readThreshold });
+  await moderation.enable(); moderation.observe([chatPost('snapshot'), chatPost('next', 1)]);
+  const first = moderation.evaluate('snapshot'); const next = moderation.evaluate('next');
+  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+  threshold = 0.9; finish(new Response(JSON.stringify(apiResponse({ attack: 0.7 }))));
+  const result = await first;
+  expect(result).toMatchObject({ ok: true, value: { threshold: 0.65, malicious: true, reasons: ['attack'] } });
+  expect(await next).toMatchObject({ ok: true, value: { threshold: 0.9, malicious: false, reasons: [] } });
+  expect(await moderation.evaluate('snapshot')).toEqual(result);
+  expect(readThreshold).toHaveBeenCalledTimes(2); expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(JSON.stringify(JSON.parse(fetcher.mock.calls[0][1].body))).not.toContain('threshold');
+  moderation.reset();
+});
+it.each([0, 1, 0.731])('custom閾値%sは数値0を欠落扱いせず結果に保持する', async threshold => {
+  const moderation = createModeration({ client: createJevClient(async () => new Response(JSON.stringify(apiResponse()))),
+    readKey: async () => 'synthetic', readThreshold: async () => threshold });
+  await moderation.enable(); moderation.observe([chatPost('custom')]);
+  expect(await moderation.evaluate('custom')).toMatchObject({ ok: true, value: { threshold, malicious: threshold === 0 } });
+  moderation.reset();
+});
+it('閾値読取失敗はAPIを呼ばず悪質/安全にも確定しない', async () => {
+  const fetcher = vi.fn();
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic',
+    readThreshold: async () => { throw new Error('fixture storage'); } });
+  await moderation.enable(); moderation.observe([chatPost('failed-setting')]);
+  const result = await moderation.evaluate('failed-setting');
+  expect(result).toMatchObject({ ok: true, value: { jev: 'failed', error: { code: 'network' } } });
+  if (result.ok) expect(result.value.malicious).toBeUndefined();
+  expect(fetcher).not.toHaveBeenCalled(); moderation.reset();
+});
 it('大量観測の判定記録も10000件までで、保持外IDを正常判定にしない', async () => {
   const moderation = createModeration({ client: createJevClient(vi.fn()), readKey: async () => undefined });
   moderation.observe(Array.from({ length: 10001 }, (_, i) => ({ ...chatPost(`many-${i}`, 0, `author-${i}`), publishedAt: undefined })));

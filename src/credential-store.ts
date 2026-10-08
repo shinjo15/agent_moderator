@@ -14,7 +14,10 @@ let initialization: Promise<void> | undefined;
 
 // Called at every service-worker startup; every operation awaits this same gate.
 export function initializeCredentialStorage(): Promise<void> {
-  initialization ??= local().setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+  initialization ??= local().setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(error => {
+    initialization = undefined; // A later operation must re-establish the gate, not reuse a rejected promise.
+    throw error;
+  });
   return initialization;
 }
 

@@ -84,7 +84,7 @@ export function createJevPanel(main: HTMLElement, transport: ReturnType<typeof c
 
       const time = result.burst === 'unavailable' ? ' / 投稿時刻を確認できないため、連投は判定できません' : '';
       const jev = result.jev === 'failed' ? ` / Jev判定失敗: ${failures[result.error!.code]}`
-        : result.jev === 'disabled' ? ' / Jev判定は未開始・停止中' : result.jev === 'unjudged' ? ' / Jev判定は未実施' : ' / Jev判定済み';
+        : result.jev === 'disabled' ? ' / Jev判定は未開始・停止中' : result.jev === 'unjudged' ? ' / Jev判定は未実施' : ` / Jev判定済み（判定の基準値 ${result.threshold}）`;
       label.textContent = `${outcome}${jev}${time}`;
       if (result.malicious === true) label.classList.add('is-malicious');
       if (result.evaluation) {

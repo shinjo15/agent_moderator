@@ -1,5 +1,6 @@
 import { runtime } from './extension-runtime';
 import type { ApiKeyProvider, CredentialStatus } from './credential-store';
+import { createFilterSettingsPanel } from './jev/options';
 import { createNotice } from './ui-notice';
 
 const heading = document.createElement('h1');
@@ -106,5 +107,6 @@ for (const [provider, name] of [['jev', 'Jev'], ['youtube', 'YouTube']] as const
   section.append(title, description, label, input, status, actions);
   main.append(section);
 }
+createFilterSettingsPanel(main, runtime);
 main.append(notice);
 void request({ type: 'storage.init' });

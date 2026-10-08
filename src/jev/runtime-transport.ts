@@ -2,6 +2,7 @@ import type { runtime } from '../extension-runtime';
 import type { Evaluation, JevError } from './contracts';
 import type { ModerationResult } from './moderation';
 import { categories, decide, type Values } from './policy';
+import { validThreshold } from './threshold';
 const object = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const errors = ['missingKey', 'auth', 'validation', 'rateLimited', 'overloaded', 'network', 'invalidResponse', 'aborted', 'api'];
 function error(value: unknown): JevError {
@@ -41,15 +42,15 @@ export function createModerationTransport(channel: Pick<typeof runtime, 'sendMes
           || (value.malicious !== undefined && typeof value.malicious !== 'boolean') || !Array.isArray(value.reasons)
           || !value.reasons.every(reason => reason === 'burst' || categories.includes(reason))) return undefined;
         const evaluated = value.jev === 'evaluated' ? evaluation(value.evaluation) : undefined;
-        if (value.jev === 'evaluated' && !evaluated) return undefined;
-        const expected = evaluated ? decide(evaluated.values) : { malicious: undefined as boolean | undefined, reasons: [] as ModerationResult['reasons'] };
+        if (value.jev === 'evaluated' && (!evaluated || !validThreshold(value.threshold))) return undefined;
+        const expected = evaluated ? decide(evaluated.values, value.threshold as number) : { malicious: undefined as boolean | undefined, reasons: [] as ModerationResult['reasons'] };
         const reasons: ModerationResult['reasons'] = [...expected.reasons];
         if (value.burst === 'confirmed') { expected.malicious = true; reasons.push('burst'); }
         const actualReasons = value.reasons;
         if (value.malicious !== expected.malicious || actualReasons.length !== reasons.length || !reasons.every((reason, i) => actualReasons[i] === reason)) return undefined;
         return { id, authorChannelId, burst: value.burst as ModerationResult['burst'], jev: value.jev as ModerationResult['jev'],
           malicious: value.malicious as boolean | undefined, reasons: value.reasons as ModerationResult['reasons'],
-          ...(evaluated ? { evaluation: evaluated } : {}),
+          ...(evaluated ? { evaluation: evaluated, threshold: value.threshold as number } : {}),
           ...(value.jev === 'failed' ? { error: error(value.error) } : {}) };
       } catch { return undefined; }
     },

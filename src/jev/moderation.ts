@@ -4,14 +4,16 @@ import { createHistory, type Context } from './history';
 import { decide, type Category } from './policy';
 import type { SessionStorage } from '../youtube/background-handler';
 import { createBoundedQueue, createTransientMap, MAX_PENDING_EVALUATIONS } from '../retention';
+import { DEFAULT_THRESHOLD, validThreshold } from './threshold';
 export type ModerationResult = {
   id: string; authorChannelId: string; burst: Context['burst'];
   malicious?: boolean; reasons: (Category | 'burst')[];
-  jev: 'evaluated' | 'disabled' | 'unjudged' | 'failed'; evaluation?: Evaluation; error?: JevError;
+  jev: 'evaluated' | 'disabled' | 'unjudged' | 'failed'; evaluation?: Evaluation; threshold?: number; error?: JevError;
 };
-export function createModeration({ client, readKey, session, now = Date.now }: {
+export function createModeration({ client, readKey, session, now = Date.now, readThreshold = async () => DEFAULT_THRESHOLD }: {
   client: JevClient; readKey: () => Promise<string | undefined>;
   session?: Pick<SessionStorage, 'get' | 'set'>; now?: () => number;
+  readThreshold?: () => Promise<number>;
 }) {
   const history = createHistory({ now });
   type Record = { authorChannelId: string; burst: Context['burst']; allowed: boolean; result?: ModerationResult };
@@ -58,6 +60,10 @@ export function createModeration({ client, readKey, session, now = Date.now }: {
     if (enabled && record.allowed && record.burst !== 'confirmed') {
       if (history.context(id)) {
         try {
+          // Capture once at new evaluation start, not observation/enqueue/response time.
+          const threshold = await readThreshold();
+          if (!validThreshold(threshold)) throw new Error('Invalid filter threshold');
+          if (current !== generation) return { ok: false as const, error: { code: 'aborted' as const } };
           const key = await readKey();
           if (current !== generation) return { ok: false as const, error: { code: 'aborted' as const } };
           if (records.get(id) !== record) return { ok: false as const, error: { code: 'forbidden' as const } };
@@ -80,7 +86,7 @@ export function createModeration({ client, readKey, session, now = Date.now }: {
             if (!result.ok) stop();
             if (result.ok && records.get(id) !== record) return { ok: false as const, error: { code: 'forbidden' as const } };
             if (key !== latestKey) { stop(); return { ok: false as const, error: { code: 'aborted' as const } }; }
-            if (result.ok) Object.assign(base, decide(result.value.values), { jev: 'evaluated', evaluation: result.value });
+            if (result.ok) Object.assign(base, decide(result.value.values, threshold), { jev: 'evaluated', evaluation: result.value, threshold });
             else Object.assign(base, { jev: 'failed', error: result.error });
           } else {
             Object.assign(base, { jev: 'failed', error: { code: 'missingKey' } }); stop();
