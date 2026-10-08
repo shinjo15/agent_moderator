@@ -3,6 +3,19 @@ import { categories, decide, questions, type Values } from '../src/jev/policy';
 import { createJevClient } from '../src/jev/client';
 import { createHistory } from '../src/jev/history';
 import { apiResponse, chatPost, japaneseExamples, realisticJapaneseExamples } from './fixtures/jev';
+it.each([0, 0.65, 0.8, 0.9, 1])('設定閾値%sで7項目のraw値をinclusive比較する', threshold => {
+  for (const key of categories) for (const score of [0, 0.649999, 0.65, 0.8, 0.899999, 0.9, 1]) {
+    const values = Object.fromEntries(categories.map(category => [category, category === key ? score : 0])) as Values;
+    const reasons = categories.filter(category => values[category] >= threshold);
+    expect(decide(values, threshold)).toEqual({ malicious: reasons.length > 0, reasons });
+  }
+});
+it.each([NaN, Infinity, -Infinity, -0.1, 1.1, '', '0.8', null, undefined])('明示された不正閾値%sを拒否する', threshold => {
+  const values = Object.fromEntries(categories.map(category => [category, 0])) as Values;
+  // undefined alone uses the legacy default, as does an omitted argument.
+  if (threshold === undefined) expect(decide(values, threshold)).toEqual({ malicious: false, reasons: [] });
+  else expect(() => decide(values, threshold as number)).toThrow();
+});
 it('従来の13件（脅迫の引用報告・非公開住所・命令注入を含む）を保持する', () => {
   expect(japaneseExamples).toHaveLength(13);
   expect(japaneseExamples.map(example => example.text)).toContain('「殴るぞ」と言われたので通報しました。注意してください');

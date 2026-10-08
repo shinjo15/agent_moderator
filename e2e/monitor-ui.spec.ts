@@ -61,7 +61,7 @@ async function withMonitor(run: (page: Page) => Promise<void>) {
             jev: evaluated ? 'evaluated' : value.id === 'failed' ? 'failed' : value.id === 'burst' ? 'unjudged' : 'disabled',
             reasons: value.id === 'bad' ? ['attack'] : value.id === 'burst' ? ['burst'] : [],
             ...(evaluated || value.id === 'burst' ? { malicious: value.id === 'bad' || value.id === 'burst' } : {}),
-            ...(evaluated ? { evaluation: { values: Object.fromEntries(categories.map(key => [key, key === 'attack' ? score : 0])), model: 'fixture', usage: { input_tokens: 1, output_tokens: 1 } } } : {}),
+            ...(evaluated ? { threshold: 0.8, evaluation: { values: Object.fromEntries(categories.map(key => [key, key === 'attack' ? score : 0])), model: 'fixture', usage: { input_tokens: 1, output_tokens: 1 } } } : {}),
             ...(value.id === 'failed' ? { error: { code: 'network' } } : {}),
           } };
         }

@@ -39,7 +39,7 @@ Issue #3の公式YouTube取得を基盤に、取得したコメントの評価�
 | spam | 迷惑な反復・大量投稿等のスパム |
 | unrelatedPromotion | 配信に無関係な宣伝 |
 
-いずれかのnoul評価値が `>= 0.8` なら悪質。ネタバレは対象外。単なる批判・否定的感想、引用報告・注意喚起、非攻撃的冗談、ゲーム内表現はそれだけでは悪質としない。文脈不明では該当すると断定しないrubricを固定questionsへ入れる。
+いずれかのraw noul評価値が `>= 評価開始時の設定threshold` なら悪質。初期値は中0.8、高0.65／低0.9を選べ、詳細設定で0〜1 inclusiveの有限数値を保存できる。0は全評価済みコメントが該当し、1は評価値1だけが該当する。これはアプリ側のdecisionでありJev要求のrubricは変更しない。設定の保存・適用時点は [filter-settings.md](filter-settings.md) を参照。ネタバレは対象外。単なる批判・否定的感想、引用報告・注意喚起、非攻撃的冗談、ゲーム内表現はそれだけでは悪質としない。文脈不明では該当すると断定しないrubricを固定questionsへ入れる。
 
 評価対象はtarget本文だけ。historyは参照文脈であり、過去の攻撃だけで現在の批判や引用を悪質に転嫁しない。投稿内の命令・役割指定・評価値指定は未信頼stateとして扱い、固定questionsに従う構成にする。ただし、この入力分離は実モデルのprompt injection耐性を実証・保証したものではない。
 
@@ -71,11 +71,11 @@ ChatMessageに任意のpublishedAtを追加した。従来の投稿時刻なしf
 - `{ type: 'jev.stopCollection' }`: Jev停止と本文/時刻文脈解放。
 - `{ type: 'jev.evaluate', id: <実取得message ID> }`: backgroundが取得済みの対象だけを評価。本文・キー等の余分なpayloadは拒否。
 
-成功した評価応答は元のYouTube message ID、authorChannelId、burst状態、悪質性と理由code、Jev状態、任意の評価値/model/usageまたは固定エラーcode。本文やキーは評価応答へ含めない。失敗・未判定のmaliciousは未定義であり、「悪質=false」と誤って確定しない。連投確定なら独立したmalicious=trueとburst理由を返す。
+成功した評価応答は元のYouTube message ID、authorChannelId、burst状態、悪質性と理由code、Jev状態、任意の評価値/model/usageまたは固定エラーcode。`jev: evaluated` の場合は有限0〜1の評価時 `threshold` が必須で、monitor/runtimeは現在の設定でなくその値でraw値とdecisionの整合性を検証する。本文やキーは評価応答へ含めない。失敗・未判定のmaliciousは未定義であり、「悪質=false」と誤って確定しない。連投確定なら独立したmalicious=trueとburst理由を返す。
 
 背景側とmonitor側の両方で直列化する。重複IDは再通信しない。開始直前と応答後にキーを再読取し、await後に世代・Abort・キー一致を確認する。停止・キー変更・新binding後の遅延結果を返さない。新binding書込完了時にも世代を切り替え、途中の古い有効化を新対象へ持ち越さない。
 
-missingキー、401、422、429、529、network、invalidResponseは悪質根拠ではない。Jevエラーでは外部通信を停止し、自動retryしない。429/529のRetry-Afterは秒数/HTTP-dateを解釈し、明示再開も期限前は拒否する。期限だけをtrusted chrome.storage.sessionへ保持し、worker再作成・動画再選択で短縮しない。日次上限や新しい悪質しきい値は追加しない。
+missingキー、401、422、429、529、network、invalidResponseは悪質根拠ではない。Jevエラーでは外部通信を停止し、自動retryしない。429/529のRetry-Afterは秒数/HTTP-dateを解釈し、明示再開も期限前は拒否する。期限だけをtrusted chrome.storage.sessionへ保持し、worker再作成・動画再選択で短縮しない。日次上限は追加しない。
 
 ## 検証と限界
 

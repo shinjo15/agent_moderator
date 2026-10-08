@@ -7,12 +7,8 @@ import { createJevClient } from './jev/client';
 import { createModeration } from './jev/moderation';
 import { createHiddenAuthors } from './hidden-authors/store';
 import { createHiddenAuthorHandler } from './hidden-authors/handler';
-import { createFilterSettings } from './jev/settings';
-import { createFilterSettingsHandler } from './jev/settings-handler';
 
-const filterSettings = createFilterSettings({ storage: platform.storage.local, initialize: initializeCredentialStorage });
-const filter = createFilterSettingsHandler({ settings: filterSettings, runtime });
-const moderation = createModeration({ client: createJevClient(), readKey: readJevApiKeyForBackground, session: platform.storage.session, readThreshold: filterSettings.read });
+const moderation = createModeration({ client: createJevClient(), readKey: readJevApiKeyForBackground, session: platform.storage.session });
 const hiddenAuthors = createHiddenAuthors({ storage: platform.storage.local, initialize: initializeCredentialStorage });
 const hidden = createHiddenAuthorHandler({ store: hiddenAuthors, tabs: platform.tabs, session: platform.storage.session, runtime });
 const youtube = createYouTubeHandler({ session: platform.storage.session, tabs: platform.tabs, runtime, moderation,
@@ -34,17 +30,12 @@ void initializeCredentialStorage().catch(() => {});
 
 const denied = { ok: false, error: 'この要求は許可されていません。' };
 
-runtime.onMessageExternal.addListener((message, _sender, reply) => {
-  const settings = typeof message === 'object' && message !== null && 'type' in message &&
-    typeof message.type === 'string' && message.type.startsWith('settings.');
-  reply(settings ? { ...denied, code: 'authorization' } : denied);
+runtime.onMessageExternal.addListener((_message, _sender, reply) => {
+  reply(denied);
   return false;
 });
 
 runtime.onMessage.addListener((message, sender, reply) => {
-  if (typeof message === 'object' && message !== null && 'type' in message && typeof message.type === 'string' && message.type.startsWith('settings.')) {
-    void filter.handle(message, sender).then(reply); return true;
-  }
   if (typeof message === 'object' && message !== null && 'type' in message && typeof message.type === 'string' && message.type.startsWith('hidden.')) {
     void hidden.handle(message, sender).then(reply); return true;
   }

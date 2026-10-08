@@ -25,6 +25,11 @@ test('public copy: 設定とpopupは専門語なし、重要説明を見える�
     await expect(notice).toHaveCSS('font-size', '12px');
     await expect(page.locator('body')).not.toContainText(technical);
     await expect(page.locator('body')).not.toContainText('空欄で保存');
+    await expect(page.getByTestId('filter-status')).toContainText('現在の設定：中 / 判定の基準値 0.8');
+    await page.getByText('詳細設定', { exact: true }).click();
+    await expect(page.getByLabel('判定の基準値', { exact: true })).toHaveValue('0.8');
+    await expect(page.locator('.filter-details')).toContainText('0では、判定済みのすべてのコメントが悪質');
+    await expect(page.locator('.filter-details')).toContainText('1では、スコアが1の項目だけ');
     await page.goto(`chrome-extension://${id}/popup.html`);
     await expect(page.locator('body')).not.toContainText(technical);
     await expect(page.locator('body')).toContainText('あなたの画面だけ');

@@ -178,7 +178,7 @@ test('ブラウザとservice workerを再起動してもキーを保持しUIに�
   } finally { await launched.context.close(); await rm(profile, { recursive: true, force: true }); }
 });
 
-test('別拡張機能の実external senderからキーinit/保存/取得/削除を拒否する', async () => {
+test('別拡張機能の実external senderからキー操作とフィルター設定を拒否する', async () => {
   const profile = await mkdtemp(join(tmpdir(), 'agent-moderator-external-profile-'));
   const companion = await mkdtemp(join(tmpdir(), 'agent-moderator-external-extension-'));
   await Promise.all([
@@ -196,6 +196,9 @@ test('別拡張機能の実external senderからキーinit/保存/取得/削除�
     await options.getByLabel('YouTube APIキー').fill('synthetic-external-protected');
     await options.getByRole('button', { name: 'YouTubeキーを保存' }).click();
     await expect(options.getByTestId('youtube-status')).toHaveText('設定済み');
+    await options.getByLabel('フィルターの強さ', { exact: true }).selectOption('low');
+    await options.getByRole('button', { name: 'フィルター設定を保存', exact: true }).click();
+    await expect(options.getByTestId('filter-status')).toContainText('保存しました：低 / 判定の基準値 0.9');
     await expect.poll(() => context.serviceWorkers().some(value => value.url().endsWith('/external-worker.js'))).toBe(true);
     const externalWorker = context.serviceWorkers().find(value => value.url().endsWith('/external-worker.js'))!;
     const externalPage = await context.newPage();
@@ -205,6 +208,11 @@ test('別拡張機能の実external senderからキーinit/保存/取得/削除�
         type, provider: 'youtube', value: 'synthetic-attacker',
       }), { target: id, type })).toEqual({ ok: false, error: 'この要求は許可されていません。' });
     }
+    for (const message of [{ type: 'settings.getFilter' }, { type: 'settings.saveFilter', threshold: 0.65 }]) {
+      expect(await externalPage.evaluate(({ target, message }) => chrome.runtime.sendMessage(target, message), { target: id, message }))
+        .toEqual({ ok: false, error: 'この要求は許可されていません。', code: 'authorization' });
+    }
+    expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'settings.getFilter' }))).toEqual({ ok: true, value: { threshold: 0.9 } });
     expect(await worker.evaluate(async () => (await chrome.storage.local.get(['apiKey.youtube']))['apiKey.youtube'] === 'synthetic-external-protected')).toBe(true);
   } finally {
     await context.close();

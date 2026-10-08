@@ -10,7 +10,7 @@
 
 - 非表示リストの単位はYouTubeの配信video ID。同じ投稿者でも別videoへ登録を持ち越さない。
 - 登録根拠は、backgroundで取得済みIDに対して確定したJevの`malicious=true`、または既取得コメントによるローカル連投の確定結果だけ。API/判定失敗、未判定、判定待ちを悪質扱いしない。
-- #4のいずれかのnoul評価値 `>= 0.8`、同一投稿者の10秒以内10件以上、Jev文脈60秒以内・対象込み最大20件の規則は変更していない。詳細は [jev-moderation.md](jev-moderation.md)。
+- いずれかのraw noul評価値 `>= 評価開始時の設定threshold`（初期中0.8／高0.65／低0.9、詳細0〜1 inclusive）で悪質と判定する。設定変更は新評価だけに適用し、in-flight/cachedは評価時thresholdを維持する。既存非表示IDは設定変更で自動解除せず、過去コメントを再Jev送信しない。同一投稿者の10秒以内10件以上、Jev文脈60秒以内・対象込み最大20件の規則は変更していない。詳細は [jev-moderation.md](jev-moderation.md) と [filter-settings.md](filter-settings.md)。
 - 監視停止は取得・判定の停止。登録済み投稿者の既存・新着非表示は続く。monitor close、キー変更・削除、worker/browser再起動でもリストを勝手に消さない。
 - 一覧は現在選択したvideoのみ。別videoを確認・解除する場合は、そのwatch/liveタブをpopupから選び直す。全videoの管理画面ではない。
 - 明示解除は対象videoの非表示IDを除き、contentの定期更新で既存・新着へ反映する。content/monitorの更新は1秒間隔だが、バックグラウンドのtimer throttling等により反映が遅れる場合があり、厳密な即時反映は保証しない。

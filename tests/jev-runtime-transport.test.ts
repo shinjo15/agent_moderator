@@ -1,14 +1,23 @@
 import { expect, it, vi } from 'vitest';
 import { createModerationTransport } from '../src/jev/runtime-transport';
-import { categories } from '../src/jev/policy';
-const values = Object.fromEntries(categories.map(key => [key, 0.1]));
-const evaluated = { id: 'one', authorChannelId: 'author', burst: 'notObserved', malicious: false, reasons: [], jev: 'evaluated',
+import { categories, type Values } from '../src/jev/policy';
+const values = Object.fromEntries(categories.map(key => [key, 0.1])) as Values;
+const evaluated = { id: 'one', authorChannelId: 'author', burst: 'notObserved', malicious: false, reasons: [], jev: 'evaluated', threshold: 0.8,
   evaluation: { values, model: 'jev-fixture', usage: { input_tokens: 1, output_tokens: 2 } } };
 it('IPCはIDだけを送り正しい対応先の結果を受け取る', async () => {
   const sendMessage = vi.fn(async () => ({ ok: true, value: evaluated }));
   const transport = createModerationTransport({ sendMessage });
   expect(await transport.evaluate('one', 'author')).toEqual(evaluated);
   expect(sendMessage).toHaveBeenCalledWith({ type: 'jev.evaluate', id: 'one' });
+});
+it.each([0, 0.65, 0.9, 1])('IPCは現在の固定値でなく評価snapshot閾値%sに従う', async threshold => {
+  const scores = { ...values, attack: 0.7 };
+  const reasons = categories.filter(key => scores[key] >= threshold);
+  const value = { ...evaluated, threshold, malicious: reasons.length > 0, reasons, evaluation: { ...evaluated.evaluation, values: scores } };
+  expect(await createModerationTransport({ sendMessage: async () => ({ ok: true, value }) }).evaluate('one', 'author')).toEqual(value);
+});
+it.each([undefined, '', '0.8', NaN, Infinity, -0.1, 1.1])('evaluated結果の閾値%sは不正で表示へ流さない', async threshold => {
+  expect(await createModerationTransport({ sendMessage: async () => ({ ok: true, value: { ...evaluated, threshold } }) }).evaluate('one', 'author')).toBeUndefined();
 });
 it.each([
   { ...evaluated, id: 'other' }, { ...evaluated, authorChannelId: 'other' },
