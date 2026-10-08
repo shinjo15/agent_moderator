@@ -1,0 +1,50 @@
+Subject: Pre-release compliance inquiry for a viewer-side live chat filter (Agent Moderator)
+
+Dear YouTube API Services Team,
+
+I am developing Agent Moderator, a Chrome extension for viewers of YouTube live streams. Before distributing it publicly, I would like to clarify whether the following use case complies with the YouTube API Services Terms of Service and Developer Policies. This use case has not been audited or approved.
+
+The extension is a viewer-side filter. It does not provide broadcaster or moderator actions such as banning users or deleting messages.
+
+Current implementation:
+
+1. For a live stream selected by the viewer, the extension retrieves live chat using videos.list and liveChatMessages.list. It follows the API's pagination tokens and polling interval. Chat replay from ended streams is not supported.
+
+2. After the viewer explicitly enables AI evaluation, the extension sends each retrieved message to TypeSafe AI's Jev API in a separate inference request. Jev returns scores for seven categories: abusive attacks, hate or discrimination, threats or incitement to harm, sexual harassment, exposure of personal information, spam, and unrelated advertising. Each request may include previously retrieved messages from the same author within the preceding 60 seconds, with a maximum of 20 messages including the message being evaluated.
+
+3. The chat data sent to Jev consists of message text and posting timestamps. Author IDs, display names, and video IDs are excluded as separate fields, but personal information may still appear in the message text. Automatic masking is not currently implemented. Each user's Jev API key is used in the authentication header sent to TypeSafe.
+
+4. The extension displays the scores and uses a viewer-configured threshold to add an author to a local hidden-author list for that stream. It also detects repeated posting using retrieved author IDs and timestamps, with a threshold of 10 messages within 10 seconds.
+
+5. On the YouTube live chat page, the extension matches stable author IDs and hides that author's existing and subsequent messages on the viewer's own screen. It does not change posts or ban status on YouTube's servers, affect other viewers, or modify the video player or advertisements.
+
+6. Message text and evaluation results are not archived. Temporary in-memory data has time and count limits; up to the latest 200 messages may remain visible in the extension's monitoring page until it is closed. The stream-specific hidden-author IDs, retrieved display names, and unhide revision metadata are stored locally in the Chrome profile. Hidden-author IDs persist until explicitly unhidden, without automatic expiry or scheduled API refresh. Revision metadata remains after unhiding to prevent stale in-flight results from re-hiding an author.
+
+7. There is no developer-operated backend. Requests go directly from the user's device to Google and TypeSafe. Each user supplies their own YouTube and Jev API keys; I do not distribute a developer's shared key.
+
+Could you please advise on the following points and any required changes or approval procedures?
+
+- Under the restrictions on derived data and metrics, including III.E.4.h, are the external AI scores and repeated-posting detection permitted? Is separate permission required? I do not assume that the exceptions for approved analytics use cases apply here.
+
+- Under the restrictions on modifying content or functionality in III.I, is an explicitly enabled, viewer-side filter permitted, including DOM-based author-ID matching and hiding chat rows? What requirements apply to author attribution and author links?
+
+- How do retention, deletion or refresh within 30 days, and deletion-request requirements apply to local filter settings containing API-derived stream IDs, author IDs, display names, and unhide revision metadata?
+
+- Is sending public chat text to an external inference provider permitted? What rights, notices, or consents are required in addition to the viewer's opt-in?
+
+- Is public distribution of the same extension using each user's own Google Cloud project's API key consistent with the restrictions on multiple projects and quota sharding? Which project and operating model should the developer submit for review? I am not seeking to circumvent quota limits.
+
+- Are there use-case-specific requirements for privacy policies, consent flows, YouTube and Google policy links, attribution, or deletion controls before release?
+
+The Developer Policies Guide directs developers who are unsure whether a service is allowed to apply for an API Compliance Audit. However, the current form's request options appear to cover an additional-quota request or a requested re-audit. I am seeking pre-release clarification, not claiming that YouTube has requested a re-audit or that I need additional quota. Please advise on the appropriate submission route for this situation.
+
+Public distribution is on hold pending clarification and any necessary changes. Retention controls, consent flows, and public policy documents that are not yet complete are not being represented as compliant or approved.
+
+Repository: https://github.com/shinjo15/agent_moderator
+The distribution channel and pricing have not yet been finalized.
+
+Thank you for your guidance.
+
+Best regards,
+[Your name]
+[Your contact email, if not supplied elsewhere in the form]
