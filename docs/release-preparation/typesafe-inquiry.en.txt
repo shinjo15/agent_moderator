@@ -1,0 +1,39 @@
+Subject: Pre-release questions about Jev integration, third-party chat messages, and data retention
+
+Dear TypeSafe Support Team,
+
+I am developing Agent Moderator, a Chrome extension that lets viewers filter YouTube live chat on their own screen. Before distributing it publicly, I would like to confirm whether the proposed use of Jev is permitted and what data protection requirements apply.
+
+The extension retrieves live chat through the official YouTube Data API. After a viewer explicitly enables Jev evaluation, it sends each newly retrieved message to Jev in a separate request. Each request may include previously retrieved messages from the same author within the preceding 60 seconds, with a maximum of 20 messages including the message being evaluated.
+
+Jev evaluates seven categories: abusive attacks, hate or discrimination, threats or incitement to harm, sexual harassment, exposure of personal information, spam, and unrelated advertising. The extension uses the scores to hide messages from the corresponding author on that viewer's screen only. It does not ban users, delete posts on YouTube, or train models.
+
+The chat data sent to Jev consists of message text and posting timestamps. It excludes author IDs, display names, and video IDs as separate fields. However, the text itself may contain personal information, information about minors, or harmful or unlawful content. Automatic anonymization is not currently implemented. The viewer submitting a message is not necessarily its author, and I do not treat the viewer's opt-in as consent from that author.
+
+There is no developer-operated backend. Each user supplies an API key issued through their own TypeSafe account, stores it in the extension, and makes API requests directly from their device. I do not distribute a shared developer key or intend to resell access to the TypeSafe API as a standalone service. I am separately seeking clarification of the applicable YouTube policies.
+
+Could you please clarify the following?
+
+1. Is this moderation use case, including public distribution of an extension using each user's own API key, permitted under the Master Customer Agreement, Acceptable Use Policy, and Documentation? What contractual roles and obligations apply to the extension developer and individual users?
+
+2. What rights, notices, and consents are required to submit third-party public chat messages for inference? Are there restrictions or required safeguards for detecting harmful content when the input may contain personal information, information about minors, or unlawful material?
+
+3. What are the retention periods and uses for API inputs, outputs, logs, Telemetry, and backups? Under what circumstances may your staff or service providers access this data?
+
+4. How does the Privacy Policy's statement that Input is not used to train or fine-tune models relate to the MCA's prior-consent provision and any individual Order? Are there settings or exceptions that users should check?
+
+5. Are zero-retention or reduced-retention options available? If so, which plans, procedures, and types of data do they cover? What is the process for requesting deletion of a previously submitted third-party message, including deletion deadlines and treatment of backups?
+
+6. What disclosures should appear in the extension's privacy policy and opt-in screen? Are a DPA or other international-transfer arrangements required for users outside the United States? Are there requirements for referring to TypeSafe or Jev in the extension?
+
+7. Are personal-information masking or reduced context history required or recommended before public distribution?
+
+Please refer me to your privacy team if any of these questions require their review. Public distribution is on hold while I clarify the requirements. I am not attaching API keys, actual chat messages, or user profiles to this inquiry.
+
+Repository: https://github.com/shinjo15/agent_moderator
+The distribution channel, pricing, and users' subscription plans have not yet been finalized.
+
+Thank you for your guidance.
+
+Best regards,
+[Your name]
