@@ -48,7 +48,10 @@ export function createModeration({ client, readKey, session, now = Date.now, rea
       if (typeof stored === 'number' && Number.isFinite(stored)) notBefore = Math.max(notBefore, stored);
       if (now() < notBefore) return { ok: false as const, error: { code: 'rateLimited' as const, retryAfterMillis: notBefore - now() } };
       if (!await readKey()) return { ok: false as const, error: { code: 'missingKey' as const } };
-    } catch { stop(); return { ok: false as const, error: { code: 'network' as const } }; }
+    } catch {
+      if (current !== generation) return { ok: false as const, error: { code: 'aborted' as const } };
+      stop(); return { ok: false as const, error: { code: 'network' as const } };
+    }
     if (current !== generation) return { ok: false as const, error: { code: 'aborted' as const } };
     enabled = true;
     return { ok: true as const };

@@ -6,6 +6,7 @@ import { createJevClient } from '../src/jev/client';
 import { apiResponse, chatPost } from './fixtures/jev';
 import { createHiddenAuthors } from '../src/hidden-authors/store';
 import { createYouTubeClient } from '../src/youtube/client';
+import { createConfirmation, CONFIRMATION_KEY, CONFIRMATION_VERSION } from '../src/confirmation';
 const createModeration = (deps: Parameters<typeof createUnconfirmedModeration>[0]) =>
   createUnconfirmedModeration({ readConfirmation: async () => true, ...deps });
 
@@ -89,6 +90,65 @@ it.each([
     if (type === 'jev.enable') { moderation.observe([chatPost('explicit-resume', 1)]); await moderation.evaluate('explicit-resume'); expect(jevFetch).toHaveBeenCalledTimes(1); }
     else expect(youtubeFetch).toHaveBeenCalledTimes(1);
     moderation.reset();
+});
+
+it.each([
+  ['localKey', true], ['notBefore', true], ['localKey', false], ['notBefore', false],
+] as const)('Jev enable内部%s遅延rejectは確認変更=%sの世代だけを停止する', async (wait, changed) => {
+  const { deps } = setup();
+  const localValues: Record<string, unknown> = { [CONFIRMATION_KEY]: { version: CONFIRMATION_VERSION }, 'apiKey.jev': 'synthetic' };
+  const local = {
+    setAccessLevel: vi.fn(async () => {}),
+    get: vi.fn(async (keys: string[]) => Object.fromEntries(keys.map(key => [key, localValues[key]]))),
+    set: vi.fn(async (values: Record<string, unknown>) => { Object.assign(localValues, values); }),
+  };
+  vi.stubGlobal('chrome', { storage: { local } });
+  const { initializeCredentialStorage, readJevApiKeyForBackground } = await import('../src/credential-store');
+  const confirmation = createConfirmation({ storage: local, initialize: initializeCredentialStorage });
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(apiResponse())));
+  const moderation = createUnconfirmedModeration({ client: createJevClient(fetcher), readKey: readJevApiKeyForBackground,
+    readConfirmation: confirmation.read, session: deps.session });
+  const enable = vi.spyOn(moderation, 'enable');
+  const handler = createYouTubeHandler({ ...deps, moderation, readConfirmation: confirmation.read });
+  try {
+    await handler.handle(open, popup);
+    expect(await handler.handle({ type: 'jev.enable' }, monitor)).toEqual({ ok: true });
+    moderation.observe([chatPost('before-reject')]);
+    const entered = deferred(); let reject!: (error: Error) => void;
+    const pendingRead = new Promise<Record<string, unknown>>((_resolve, fail) => { reject = fail; });
+    const storage = wait === 'localKey' ? local : deps.session;
+    const originalGet = storage.get.getMockImplementation()!;
+    let delayed = false;
+    storage.get.mockImplementation(keys => {
+      if (!delayed && keys.includes(wait === 'localKey' ? 'apiKey.jev' : 'jev.notBefore')) {
+        delayed = true; entered.resolve(); return pendingRead;
+      }
+      return originalGet(keys);
+    });
+    const oldEnable = handler.handle({ type: 'jev.enable' }, monitor);
+    await entered.promise;
+    if (changed) {
+      await handler.confirmationChanged();
+      expect(deps.runtime.sendMessage).toHaveBeenCalledWith({ type: 'confirmation.changed' });
+      expect(await handler.handle({ type: 'jev.enable' }, monitor)).toEqual({ ok: true });
+    }
+    moderation.observe([chatPost('new-post', 1)]);
+    expect(fetcher).not.toHaveBeenCalled();
+    reject(new Error('synthetic-read-rejection'));
+    expect(await oldEnable).toMatchObject({ ok: false, error: { code: changed ? 'aborted' : 'network' } });
+    expect(await handler.handle({ type: 'jev.evaluate', id: 'new-post' }, monitor))
+      .toMatchObject({ ok: true, value: { jev: changed ? 'evaluated' : 'disabled' } });
+    expect(fetcher).toHaveBeenCalledTimes(changed ? 1 : 0);
+    // The handler's epoch check alone can hide a core network failure and its stop side effect.
+    expect(await enable.mock.results[1].value).toEqual({ ok: false, error: { code: changed ? 'aborted' : 'network' } });
+    if (!changed) {
+      expect(await handler.handle({ type: 'jev.enable' }, monitor)).toEqual({ ok: true });
+      moderation.observe([chatPost('explicit-resume', 2)]);
+      expect(await handler.handle({ type: 'jev.evaluate', id: 'explicit-resume' }, monitor))
+        .toMatchObject({ ok: true, value: { jev: 'evaluated' } });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    }
+  } finally { moderation.reset(); vi.unstubAllGlobals(); vi.resetModules(); }
 });
 
 it('確認変更で実行前queueの旧取得も失効し送信やcooldownを作らない', async () => {

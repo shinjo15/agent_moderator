@@ -5,7 +5,14 @@ import { join, resolve } from 'node:path';
 import { confirmUsage } from './fixtures/confirm-usage';
 import { apiResponse } from '../tests/fixtures/jev';
 declare const chrome: {
-  runtime: { sendMessage(message: unknown): Promise<unknown> };
+  runtime: {
+    id: string; getURL(path: string): string;
+    sendMessage(message: unknown): Promise<unknown>;
+    onMessage: {
+      addListener(listener: (message: unknown, sender: { id?: string; url?: string }) => boolean): void;
+      removeListener(listener: (message: unknown, sender: { id?: string; url?: string }) => boolean): void;
+    };
+  };
   tabs: { create(options: { url: string; active: boolean }): Promise<{ id: number }> };
   storage: {
     local: { get(keys: string[]): Promise<Record<string, unknown>>; set(values: Record<string, unknown>): Promise<void> };
@@ -50,7 +57,34 @@ test('MV3 background: 旧runtime/旧版/読取・保存失敗は通信0、Jev有
     const monitor = await monitorOpened; await monitor.goto(`chrome-extension://${id}/monitor.html`);
     await expect(monitor.getByRole('button', { name: '取得を開始', exact: true })).toBeEnabled();
     for (const value of [undefined, { version: 0 }, { version: '1' }]) {
-      if (value !== undefined) await worker.evaluate(value => chrome.storage.local.set({ 'usage.confirmation': value }), value);
+      if (value !== undefined) {
+        await monitor.evaluate(() => {
+          const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+          let stopped: Promise<unknown> | undefined;
+          chrome.runtime.sendMessage = message => {
+            const response = send(message);
+            if (typeof message === 'object' && message !== null && 'type' in message && message.type === 'jev.stopCollection') stopped = response;
+            return response;
+          };
+          Object.assign(globalThis, { confirmationStopped: new Promise<void>(resolve => {
+            const listener = (message: unknown, sender: { id?: string; url?: string }) => {
+              if (sender.id !== chrome.runtime.id || (sender.url !== undefined && sender.url !== chrome.runtime.getURL('background.js'))
+                || typeof message !== 'object' || message === null || !('type' in message) || message.type !== 'confirmation.changed') return false;
+              // The production monitor listener runs first and sends stopCollection.
+              // Wait for its response too: the notification alone precedes that epoch change.
+              if (stopped) void stopped.then(() => {
+                chrome.runtime.onMessage.removeListener(listener);
+                chrome.runtime.sendMessage = send;
+                resolve();
+              });
+              return false;
+            };
+            chrome.runtime.onMessage.addListener(listener);
+          }) });
+        });
+        await worker.evaluate(value => chrome.storage.local.set({ 'usage.confirmation': value }), value);
+        await monitor.evaluate(() => (globalThis as unknown as { confirmationStopped: Promise<void> }).confirmationStopped);
+      }
       expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'youtube.resolve', requestId: 'legacy', videoId: 'abcdefghijk' })))
         .toMatchObject({ ok: false, error: { code: 'confirmationRequired' } });
       expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'jev.enable' })))
