@@ -6,6 +6,7 @@ import { createJevPanel } from './jev/monitor';
 import { createHiddenAuthorPanel } from './hidden-authors/monitor';
 import { MAX_VISIBLE_MESSAGES } from './retention';
 import { createNotice } from './ui-notice';
+import { createAuthorLabel } from './author-label';
 
 const main = document.querySelector('main')!;
 const heading = document.createElement('h1');
@@ -79,8 +80,7 @@ const monitor = createChatMonitor({ transport: createRuntimeTransport(),
       item.className = 'chat-message';
       const content = document.createElement('div');
       content.className = 'chat-content';
-      const author = document.createElement('span');
-      author.textContent = message.authorChannelId;
+      const author = createAuthorLabel(message.authorChannelId, message.authorDisplayName);
       author.classList.add('chat-author');
       const text = document.createElement('span');
       text.className = 'chat-text';

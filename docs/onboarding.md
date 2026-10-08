@@ -88,9 +88,9 @@ Jevへ送る投稿データは、対象と既取得の同一投稿者の直近60
 
 非表示の対象は確定したJev悪質判定または既取得投稿によるローカル連投だけです。判定待ち・失敗では登録しません。実DOMではtext-messageのみ確認済みで、paid-message等やreplayでの非表示は保証しません。[対応範囲](local-author-filter.md)
 
-1. popupから対象のwatch/liveタブを選び、開いたmonitorの「この配信の非表示投稿者」で「対象動画: video ID / N人を非表示」とchannel IDの一覧を確認します。表示名では照合しません。別配信を確認・解除するにはその配信のタブをpopupから選び直します。全配信一覧はありません。
-2. 対象channel ID横の「非表示を解除」を押します。contentの定期更新で、まだページに存在する既存行と新着行へ反映します（非activeタブでは遅れる場合があります）。削除済みの投稿を再生成はしません。
-3. リストはvideo ID別に `chrome.storage.local` の `hiddenAuthors.<video ID>` に `{ ids, revisions }` として保持します。`ids` は非表示channel ID、`revisions` は解除世代です。同期・自動期限はありません。
+1. popupから対象のwatch/liveタブを選び、開いたmonitorの「この配信の非表示投稿者」で投稿者名の一覧を確認します。未取得名や以前のID-onlyデータは「名前不明」と表示し、「投稿者ID」を開くと補足IDを確認できます。名前では照合せず、同名でも別IDなら別投稿者です。別配信を確認・解除するにはその配信のタブをpopupから選び直します。全配信一覧はありません。
+2. 対象投稿者の「非表示を解除」を押します。同名の場合は補足IDも確認してください。contentの定期更新で、まだページに存在する既存行と新着行へ反映します（非activeタブでは遅れる場合があります）。削除済みの投稿を再生成はしません。
+3. リストはvideo ID別に `chrome.storage.local` の `hiddenAuthors.<video ID>` に `{ ids, revisions, displayNames? }` として保持します。`ids` は非表示channel ID、`revisions` は解除世代、`displayNames` は既取得の表示名です。名前の補完APIは使いません。同期・自動期限はありません。
 4. 「取得を停止」やmonitor close、キー削除は取得／判定を止めても登録済みの既存・新着非表示とリストを解除しません。worker／browser再起動後もリストは残り、取得とJev opt-inは自動再開しません。
 5. 各配信で保存済みの対象を個別に解除します。一括解除／revision完全削除UIはありません。解除で対象は `ids` から外れますが、解除前の結果の即再登録を防ぐ `revisions` metadataと空のrecordは残ります。解除後の新しい悪質投稿は再登録され得ます。worker再起動を跨ぐmessage IDの重複排除は永続化していません。
 

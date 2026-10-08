@@ -1,6 +1,8 @@
 import { createBoundedQueue } from '../retention';
+import { validDisplayName } from '../youtube/contracts';
 type Storage = { get(keys: string[]): Promise<Record<string, unknown>>; set(values: Record<string, unknown>): Promise<void> };
-type State = { ids: string[]; revisions: Record<string, number> };
+type State = { ids: string[]; revisions: Record<string, number>; displayNames: Record<string, string> };
+export type HiddenAuthor = { authorChannelId: string; displayName?: string };
 export const validVideo = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{11}$/.test(value);
 export const validAuthor = (value: unknown): value is string => typeof value === 'string' && /^UC[A-Za-z0-9_-]{22}$/.test(value);
 export function createHiddenAuthors({ storage, initialize }: { storage: Storage; initialize(): Promise<void> }) {
@@ -9,24 +11,47 @@ export function createHiddenAuthors({ storage, initialize }: { storage: Storage;
   async function read(video: string): Promise<State> {
     await initialize();
     const value = (await storage.get([key(video)]))[key(video)] as Partial<State> | undefined;
-    if (!value || !Array.isArray(value.ids) || typeof value.revisions !== 'object' || value.revisions === null) return { ids: [], revisions: {} };
-    return { ids: value.ids.filter(validAuthor), revisions: Object.fromEntries(Object.entries(value.revisions).filter(([id, n]) => validAuthor(id) && Number.isSafeInteger(n) && n >= 0)) };
+    if (!value || !Array.isArray(value.ids) || typeof value.revisions !== 'object' || value.revisions === null) return { ids: [], revisions: {}, displayNames: {} };
+    const ids = value.ids.filter(validAuthor); const retained = new Set(ids);
+    const names = value.displayNames;
+    return { ids, revisions: Object.fromEntries(Object.entries(value.revisions).filter(([id, n]) => validAuthor(id) && Number.isSafeInteger(n) && n >= 0)),
+      displayNames: Object.fromEntries(names && typeof names === 'object' && !Array.isArray(names)
+        ? Object.entries(names).filter(([id, name]) => retained.has(id) && validDisplayName(name)) : []) };
   }
   return {
     list(video: string) { return exclusive(async () => (await read(video)).ids); },
+    listAuthors(video: string): Promise<HiddenAuthor[]> { return exclusive(async () => {
+      const state = await read(video);
+      return state.ids.map(authorChannelId => ({ authorChannelId,
+        ...(state.displayNames[authorChannelId] === undefined ? {} : { displayName: state.displayNames[authorChannelId] }) }));
+    }); },
     revision(video: string, author: string) { return exclusive(async () => { if (!validAuthor(author)) throw new Error('Invalid author'); return (await read(video)).revisions[author] ?? 0; }); },
-    add(video: string, author: string, revision: number, current = () => true) {
+    add(video: string, author: string, revision: number, current = () => true, displayName?: string) {
       return exclusive(async () => {
         if (!validAuthor(author)) throw new Error('Invalid author');
         const state = await read(video);
         if (!current() || (state.revisions[author] ?? 0) !== revision || state.ids.includes(author)) return;
-        state.ids.push(author); await storage.set({ [key(video)]: state });
+        state.ids.push(author);
+        if (validDisplayName(displayName)) state.displayNames[author] = displayName;
+        await storage.set({ [key(video)]: state });
+      });
+    },
+    updateDisplayName(video: string, author: string, revision: number, displayName: string, current = () => true) {
+      return exclusive(async () => {
+        if (!validAuthor(author)) throw new Error('Invalid author');
+        if (!validDisplayName(displayName)) return;
+        const state = await read(video);
+        if (!current() || (state.revisions[author] ?? 0) !== revision || !state.ids.includes(author)
+          || state.displayNames[author] === displayName) return;
+        state.displayNames[author] = displayName;
+        await storage.set({ [key(video)]: state });
       });
     },
     remove(video: string, author: string) {
       return exclusive(async () => {
         if (!validAuthor(author)) throw new Error('Invalid author');
         const state = await read(video); state.ids = state.ids.filter(id => id !== author);
+        delete state.displayNames[author];
         state.revisions[author] = (state.revisions[author] ?? 0) + 1;
         await storage.set({ [key(video)]: state });
       });

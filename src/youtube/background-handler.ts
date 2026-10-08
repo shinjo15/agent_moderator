@@ -1,5 +1,5 @@
 import type { MessageSender } from '../extension-runtime';
-import { failure, type ChatPage, type Result, type YouTubeClient } from './contracts';
+import { failure, validDisplayName, type ChatPage, type Result, type YouTubeClient } from './contracts';
 import { DEFAULT_INTERVAL_MILLIS } from './monitor';
 import { videoIdFromUrl } from './video-id';
 import type { createModeration } from '../jev/moderation';
@@ -43,8 +43,19 @@ export function createYouTubeHandler({ session, tabs, runtime, client, initializ
   let credentialGeneration = 0;
   let activeBinding: { generation: number; binding: Binding } | undefined;
   let collectionGeneration = 0;
-  type Observation = { video: string; author: string; revision: number; generation: number };
+  type Observation = { video: string; author: string; revision: number; generation: number; displayName?: string; nameSequence: number };
   const observations = createTransientMap<Observation>({ now });
+  let nameSequence = 0;
+  function latestDisplayName(observed: Observation) {
+    // Reuse the bounded, expiring observations; no additional author history/archive.
+    let latest = observed;
+    for (const value of observations.values()) {
+      if (value.video === observed.video && value.author === observed.author && value.revision === observed.revision
+        && value.generation === observed.generation && value.nameSequence > latest.nameSequence
+        && validDisplayName(value.displayName)) latest = value;
+    }
+    return latest.displayName;
+  }
   const cancelled = new Set<string>();
   const ready = () => gate ??= initialize().then(() => session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }));
   async function binding(): Promise<Binding | undefined> {
@@ -144,7 +155,8 @@ export function createYouTubeHandler({ session, tabs, runtime, client, initializ
               if (selectedGeneration !== bindingGeneration || collection !== collectionGeneration
                 || videoIdFromUrl((await tabs.get(selected.targetTabId)).url) !== selected.videoId) return;
               await hiddenAuthors.add(observed.video, observed.author, observed.revision,
-                () => selectedGeneration === bindingGeneration && collection === collectionGeneration && observations.get(message.id as string) === observed);
+                () => selectedGeneration === bindingGeneration && collection === collectionGeneration && observations.get(message.id as string) === observed,
+                latestDisplayName(observed));
             });
           }
         }
@@ -201,14 +213,24 @@ export function createYouTubeHandler({ session, tabs, runtime, client, initializ
               if (hiddenAuthors) for (const post of result.value.messages) {
                 if (validAuthor(post.authorChannelId) && !observations.has(post.id)) observations.set(post.id, {
                   video: current.videoId, author: post.authorChannelId, revision: await hiddenAuthors.revision(current.videoId, post.authorChannelId), generation: collection,
+                  nameSequence: 0,
                 });
+                const observed = observations.get(post.id);
+                if (observed && observed.author === post.authorChannelId && observed.video === current.videoId
+                  && observed.generation === collection && validDisplayName(post.authorDisplayName)) {
+                  observed.displayName = post.authorDisplayName; observed.nameSequence = ++nameSequence;
+                  await hiddenAuthors.updateDisplayName(observed.video, observed.author, observed.revision, post.authorDisplayName,
+                    () => !controller.signal.aborted && selectedGeneration === bindingGeneration && collection === collectionGeneration
+                      && observations.get(post.id) === observed && observed.generation === collection);
+                }
               }
               if (controller.signal.aborted || selectedGeneration !== bindingGeneration || generation !== credentialGeneration || collection !== collectionGeneration) return failure('aborted');
               const bursts = moderation?.observe(result.value.messages) ?? [];
               if (hiddenAuthors) for (const post of bursts) {
                 const observed = observations.get(post.id);
                 if (observed) await hiddenAuthors.add(observed.video, observed.author, observed.revision,
-                  () => !controller.signal.aborted && selectedGeneration === bindingGeneration && collection === collectionGeneration && observations.get(post.id) === observed);
+                  () => !controller.signal.aborted && selectedGeneration === bindingGeneration && collection === collectionGeneration && observations.get(post.id) === observed,
+                  latestDisplayName(observed));
               }
             }
             return result;
