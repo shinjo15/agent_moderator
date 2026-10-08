@@ -1,4 +1,5 @@
 import { failure, type ChatError, type ChatMessage, type ChatPage, type Result } from './contracts';
+import { createTransientMap } from '../retention';
 
 // キーはtrusted backgroundだけが扱う。monitorページには取得結果だけが渡る。
 export type ChatTransport = {
@@ -17,7 +18,7 @@ export function createChatMonitor({ transport, onMessages, onState, now = () => 
   let videoId: string | undefined;
   let chatId: string | undefined;
   let pageToken: string | undefined;
-  const seen = new Set<string>();
+  const seen = createTransientMap<true>({ now });
   let running = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let controller = new AbortController();
@@ -55,12 +56,17 @@ export function createChatMonitor({ transport, onMessages, onState, now = () => 
         chatId = result.value.liveChatId;
       } else {
         pageToken = result.value.nextPageToken;
+        let overflow = false;
         const messages = result.value.messages.filter(message => {
           if (seen.has(message.id)) return false;
-          seen.add(message.id);
+          if (!seen.set(message.id, true)) { overflow = true; return false; }
           return true;
         });
         if (messages.length) onMessages(messages);
+        if (overflow && running && current === generation) {
+          running = false;
+          onState({ status: 'error', error: { code: 'unavailable', message: 'コメントが多く、取得を停止しました。未処理のコメントは未判定です。60秒後に「取得を開始」を押してください。' } });
+        }
         if (result.value.ended && running && current === generation) {
           running = false;
           onState({ status: 'ended' });

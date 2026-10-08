@@ -80,6 +80,32 @@ async function collect(page: Page) {
   await expect(page.locator('#messages > li')).toHaveCount(52);
 }
 
+test('monitor retention: 大量inputでも直近200件だけ表示し古い本文をDOMに残さない', async () => {
+  await withMonitor(async page => {
+    await collect(page);
+    await page.evaluate(() => monitorFixture.appendMany(1000));
+    await page.clock.runFor(5_100);
+    await expect(page.locator('#messages > li')).toHaveCount(200);
+    await expect(page.locator('#messages')).not.toContainText('本文fixture zero');
+    await expect(page.locator('#messages > li').first()).toContainText('本文fixture new-801');
+    await expect(page.locator('#messages > li').last()).toContainText('本文fixture new-1000');
+  });
+});
+
+test('monitor retention: 遅い評価中も待ち行列はboundedでidle60秒に未判定へ解放', async () => {
+  await withMonitor(async page => {
+    await collect(page);
+    const before = await page.evaluate(() => monitorFixture.requests());
+    await page.evaluate(() => { monitorFixture.hold(); monitorFixture.appendMany(500); });
+    await page.clock.runFor(5_100);
+    await page.clock.runFor(60_001);
+    await expect(page.locator('#messages > li').last()).toContainText('未判定：判定の待ち時間や表示件数の上限を超えました。');
+    await page.evaluate(() => monitorFixture.release());
+    await page.clock.runFor(100);
+    expect(await page.evaluate(() => monitorFixture.requests()) - before).toBeLessThanOrEqual(1);
+  });
+});
+
 test('monitor UI fixture: 密なコメント・最大スコア/raw・配信別一覧と空状態・安全な折返し', async () => {
   await withMonitor(async page => {
     const chat = page.getByRole('region', { name: '取得コメント', exact: true });
@@ -110,6 +136,7 @@ test('monitor UI fixture: 密なコメント・最大スコア/raw・配信別�
     await expect(page.getByText(/判定スコアは7項目の最高値/)).toBeVisible();
     await expect(page.getByText(/正確さを保証する数値ではありません/)).toBeVisible();
     await expect(page.getByText('「項目別スコア」には丸め前の数値を表示し、判定にもこの数値を使います。', { exact: true })).toBeVisible();
+    await expect(page.getByText(/未判定は「該当なし」ではありません/)).toBeVisible();
     await expect(page.getByText(/終了済み配信のチャット再生には対応していません/)).toBeVisible();
     await expect(page.locator('.hidden-author-panel .monitor-note li')).toHaveCount(3);
     await expect(row('rounded').locator('.chat-text')).toContainText('<img src=x onerror=alert(1)>');

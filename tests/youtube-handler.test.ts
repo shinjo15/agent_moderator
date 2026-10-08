@@ -27,6 +27,38 @@ function setup() {
 const popup = { id: 'test', url: 'chrome-extension://test/popup.html' };
 const monitor = { id: 'test', url: 'chrome-extension://test/monitor.html', tab: { id: 10 } };
 const open = { type: 'youtube.openMonitor', tabId: 9, videoId: 'abcdefghijk' };
+it('遅い取得中の201件目は直列キューへ蓄積せず即時失敗する', async () => {
+  const { handler, deps } = setup();
+  await handler.handle(open, popup);
+  const waiting = deferred(); const response = deferred<unknown>();
+  deps.client.resolveVideo.mockImplementationOnce(() => { waiting.resolve(); return response.promise; });
+  const first = handler.handle({ type: 'youtube.resolve', requestId: 'first', videoId: open.videoId }, monitor);
+  await waiting.promise;
+  const requests = Array.from({ length: 200 }, (_, i) => handler.handle({ type: 'youtube.resolve', requestId: `waiting-${i}`, videoId: open.videoId }, monitor));
+  const result = await Promise.race([requests.at(-1), new Promise(resolve => setTimeout(() => resolve('blocked'), 20))]);
+  response.resolve({ ok: true, value: { liveChatId: 'chat-1' } }); await first; await Promise.all(requests);
+  expect(result).toMatchObject({ ok: false });
+});
+it('観測ID期限切れ後の遅延評価は非表示登録しない（永続IDは保持）', async () => {
+  const { deps, advance } = setup();
+  const hiddenAuthors = createHiddenAuthors({ storage: deps.session, initialize: deps.initialize });
+  const moderation = createModeration({ client: createJevClient(vi.fn()), readKey: async () => 'synthetic', now: deps.now });
+  const waiting = deferred(); const response = deferred<Awaited<ReturnType<typeof moderation.evaluate>>>();
+  vi.spyOn(moderation, 'evaluate').mockImplementationOnce(() => { waiting.resolve(); return response.promise; });
+  const handler = createYouTubeHandler({ ...deps, moderation, hiddenAuthors });
+  const author = 'UCabcdefghijklmnopqrstuv'; const existing = 'UCzyxwvutsrqponmlkjihgfe';
+  await handler.handle(open, popup);
+  await hiddenAuthors.add(open.videoId, existing, 0);
+  await handler.handle({ type: 'youtube.resolve', requestId: 'resolve', videoId: open.videoId }, monitor); advance(5000);
+  deps.client.listMessages.mockResolvedValue({ ok: true, value: { messages: [{ ...chatPost('expiring'), authorChannelId: author }], nextPageToken: 'next', pollingIntervalMillis: 8000, ended: false } });
+  await handler.handle({ type: 'youtube.list', requestId: 'list', liveChatId: 'chat-1' }, monitor);
+  const evaluation = handler.handle({ type: 'jev.evaluate', id: 'expiring' }, monitor); await waiting.promise;
+  advance(60001);
+  response.resolve({ ok: true, value: { id: 'expiring', authorChannelId: author, burst: 'confirmed', jev: 'disabled', malicious: true, reasons: ['burst'] } });
+  await evaluation;
+  expect(await hiddenAuthors.list(open.videoId)).toEqual([existing]);
+  moderation.reset();
+});
 it('公式取得とJev確定だけを配信別登録し、解除済みの同じ結果で再登録しない', async () => {
   const { deps, advance } = setup();
   const hiddenAuthors = createHiddenAuthors({ storage: deps.session, initialize: deps.initialize });

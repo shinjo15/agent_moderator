@@ -4,6 +4,7 @@ import { createRuntimeTransport } from './youtube/runtime-transport';
 import { createModerationTransport } from './jev/runtime-transport';
 import { createJevPanel } from './jev/monitor';
 import { createHiddenAuthorPanel } from './hidden-authors/monitor';
+import { MAX_VISIBLE_MESSAGES } from './retention';
 import { createNotice } from './ui-notice';
 
 const main = document.querySelector('main')!;
@@ -40,8 +41,10 @@ const chatHeading = document.createElement('h2');
 chatHeading.textContent = '取得コメント';
 chatHeading.id = 'chat-heading';
 const scoreNote = createNotice('monitor-note', [
+  `表示は直近${MAX_VISIBLE_MESSAGES}件です。投稿者の照合は投稿者IDで行います。`,
   '判定スコアは7項目の最高値です（小数点以下2桁）。正確さを保証する数値ではありません。',
   '「項目別スコア」には丸め前の数値を表示し、判定にもこの数値を使います。',
+  '処理が追いつかない場合や古いコメントは、未判定のまま処理を終えることがあります。未判定は「該当なし」ではありません。',
 ]);
 const chat = document.createElement('div');
 chat.className = 'chat-scroll';
@@ -85,6 +88,7 @@ const monitor = createChatMonitor({ transport: createRuntimeTransport(),
       content.append(author, text);
       item.append(content);
       messages.append(item);
+      while (messages.children.length > MAX_VISIBLE_MESSAGES) jev.remove(messages.firstElementChild as HTMLElement);
       jev.add(message.id, message.authorChannelId, item);
     }
     if (followLatest) chat.scrollTop = chat.scrollHeight;

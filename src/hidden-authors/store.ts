@@ -1,12 +1,10 @@
+import { createBoundedQueue } from '../retention';
 type Storage = { get(keys: string[]): Promise<Record<string, unknown>>; set(values: Record<string, unknown>): Promise<void> };
 type State = { ids: string[]; revisions: Record<string, number> };
 export const validVideo = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{11}$/.test(value);
 export const validAuthor = (value: unknown): value is string => typeof value === 'string' && /^UC[A-Za-z0-9_-]{22}$/.test(value);
 export function createHiddenAuthors({ storage, initialize }: { storage: Storage; initialize(): Promise<void> }) {
-  let queue: Promise<unknown> = Promise.resolve();
-  function exclusive<T>(work: () => Promise<T>): Promise<T> {
-    const result = queue.then(work, work); queue = result.catch(() => {}); return result;
-  }
+  const exclusive = createBoundedQueue();
   function key(video: string) { if (!validVideo(video)) throw new Error('Invalid video'); return `hiddenAuthors.${video}`; }
   async function read(video: string): Promise<State> {
     await initialize();
