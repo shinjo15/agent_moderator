@@ -4,6 +4,7 @@ import { DEFAULT_INTERVAL_MILLIS } from './monitor';
 import { videoIdFromUrl } from './video-id';
 import type { createModeration } from '../jev/moderation';
 import { validAuthor, type createHiddenAuthors } from '../hidden-authors/store';
+import { createBoundedQueue, createTransientMap } from '../retention';
 
 export interface SessionStorage {
   setAccessLevel(options: { accessLevel: 'TRUSTED_CONTEXTS' }): Promise<void>;
@@ -35,26 +36,17 @@ export function createYouTubeHandler({ session, tabs, runtime, client, initializ
   hiddenAuthors?: ReturnType<typeof createHiddenAuthors>;
 }) {
   let gate: Promise<void> | undefined;
-  let queue: Promise<unknown> = Promise.resolve();
-  let stateQueue: Promise<unknown> = Promise.resolve();
+  const exclusive = createBoundedQueue({ now });
+  const stateExclusive = createBoundedQueue({ now });
   let bindingGeneration = 0;
   let inflight: { requestId: string; controller: AbortController; binding: Binding } | undefined;
   let credentialGeneration = 0;
   let activeBinding: { generation: number; binding: Binding } | undefined;
   let collectionGeneration = 0;
-  const observations = new Map<string, { video: string; author: string; revision: number; generation: number }>();
+  type Observation = { video: string; author: string; revision: number; generation: number };
+  const observations = createTransientMap<Observation>({ now });
   const cancelled = new Set<string>();
   const ready = () => gate ??= initialize().then(() => session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }));
-  const exclusive = <T>(work: () => Promise<T>): Promise<T> => {
-    const result = queue.then(work, work);
-    queue = result.catch(() => {});
-    return result;
-  };
-  const stateExclusive = <T>(work: () => Promise<T>): Promise<T> => {
-    const result = stateQueue.then(work, work);
-    stateQueue = result.catch(() => {});
-    return result;
-  };
   async function binding(): Promise<Binding | undefined> {
     const value = (await session.get([BINDING]))[BINDING];
     return object(value) && Number.isSafeInteger(value.monitorTabId) && Number.isSafeInteger(value.targetTabId)
@@ -143,16 +135,16 @@ export function createYouTubeHandler({ session, tabs, runtime, client, initializ
         const collection = collectionGeneration;
         if (message.type === 'jev.enable' && count === 1) result = await moderation.enable();
         else if (message.type === 'jev.evaluate' && count === 2 && text(message.id)) {
+          const observed = observations.get(message.id);
           const evaluated = await moderation.evaluate(message.id);
           result = evaluated;
-          const observed = observations.get(message.id);
           if (hiddenAuthors && evaluated.ok && evaluated.value.malicious === true && observed && observed.video === selected.videoId
-            && observed.author === evaluated.value.authorChannelId && observed.generation === collection) {
+            && observations.get(message.id) === observed && observed.author === evaluated.value.authorChannelId && observed.generation === collection) {
             await stateExclusive(async () => {
               if (selectedGeneration !== bindingGeneration || collection !== collectionGeneration
                 || videoIdFromUrl((await tabs.get(selected.targetTabId)).url) !== selected.videoId) return;
               await hiddenAuthors.add(observed.video, observed.author, observed.revision,
-                () => selectedGeneration === bindingGeneration && collection === collectionGeneration);
+                () => selectedGeneration === bindingGeneration && collection === collectionGeneration && observations.get(message.id as string) === observed);
             });
           }
         }
@@ -216,7 +208,7 @@ export function createYouTubeHandler({ session, tabs, runtime, client, initializ
               if (hiddenAuthors) for (const post of bursts) {
                 const observed = observations.get(post.id);
                 if (observed) await hiddenAuthors.add(observed.video, observed.author, observed.revision,
-                  () => !controller.signal.aborted && selectedGeneration === bindingGeneration && collection === collectionGeneration);
+                  () => !controller.signal.aborted && selectedGeneration === bindingGeneration && collection === collectionGeneration && observations.get(post.id) === observed);
               }
             }
             return result;

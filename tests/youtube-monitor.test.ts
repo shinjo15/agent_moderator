@@ -20,6 +20,25 @@ function setup() {
   return { monitor, transport, onMessages, onState };
 }
 
+it('受信IDは停止中idleでも60秒後に解放し再開後の同IDを通知する', async () => {
+  const { monitor, onMessages } = setup();
+  monitor.start(); await vi.advanceTimersByTimeAsync(5000); monitor.stop();
+  await vi.advanceTimersByTimeAsync(60001);
+  monitor.start(); await vi.advanceTimersByTimeAsync(0);
+  expect(onMessages).toHaveBeenCalledTimes(2);
+  monitor.stop();
+});
+it('大量inputで一時ID上限を超えると取得を止め明示的な容量エラーを表示する', async () => {
+  const { monitor, transport, onState, onMessages } = setup();
+  transport.listMessages.mockResolvedValue(page(Array.from({ length: 10001 }, (_, i) => `many-${i}`)));
+  monitor.start(); await vi.advanceTimersByTimeAsync(5000);
+  expect(onMessages.mock.calls[0][0]).toHaveLength(10000);
+  expect(onState).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'error', error: expect.objectContaining({ message: 'コメントが多く、取得を停止しました。未処理のコメントは未判定です。60秒後に「取得を開始」を押してください。' }) }));
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(transport.listMessages).toHaveBeenCalledTimes(1);
+  monitor.stop();
+});
+
 it('一回ずつ取得しnextPageTokenを継承、指定間隔まで待ち重複IDを返さない', async () => {
   const { monitor, transport, onMessages } = setup();
   monitor.start();

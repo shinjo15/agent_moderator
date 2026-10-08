@@ -2,6 +2,141 @@ import { expect, it, vi } from 'vitest';
 import { createModeration } from '../src/jev/moderation';
 import { createJevClient } from '../src/jev/client';
 import { apiResponse, chatPost } from './fixtures/jev';
+it.each([429, 401])('観測期限切れ後のHTTP%iでもcurrent失敗を通知し期限切れ記録は復元しない', async status => {
+  vi.useFakeTimers(); vi.setSystemTime(0);
+  try {
+    let finish!: (value: Response) => void;
+    const fetcher = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }))
+      .mockImplementation(async () => new Response(JSON.stringify(apiResponse())));
+    const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic' });
+    await moderation.enable(); moderation.observe([chatPost('expired')]);
+    await vi.advanceTimersByTimeAsync(50000);
+    const pending = moderation.evaluate('expired');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(10001);
+    finish(new Response('{}', { status, headers: { 'Retry-After': '30' } }));
+    const failure = await pending;
+    expect(failure).toMatchObject({ ok: true, value: { jev: 'failed', reasons: [], error: { code: status === 429 ? 'rateLimited' : 'auth' } } });
+    if (failure.ok) {
+      expect(failure.value.malicious).toBeUndefined(); expect(failure.value.evaluation).toBeUndefined();
+    }
+    expect(JSON.stringify(failure)).not.toMatch(/日本語本文expired/);
+    expect(await moderation.evaluate('expired')).toMatchObject({ ok: false, error: { code: 'forbidden' } });
+    moderation.observe([chatPost('fresh', 60001)]);
+    expect(await moderation.evaluate('fresh')).toMatchObject({ ok: true, value: { jev: 'disabled' } });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    if (status === 429) {
+      expect(await moderation.enable()).toMatchObject({ ok: false, error: { code: 'rateLimited', retryAfterMillis: 30000 } });
+      await vi.advanceTimersByTimeAsync(30000);
+    }
+    expect(await moderation.enable()).toEqual({ ok: true });
+    moderation.observe([chatPost('resumed', 90001)]);
+    expect(await moderation.evaluate('resumed')).toMatchObject({ ok: true, value: { jev: 'evaluated' } });
+    expect(fetcher.mock.calls[1][1].body).not.toMatch(/日本語本文expired/);
+    expect(fetcher).toHaveBeenCalledTimes(2); moderation.reset();
+  } finally { vi.useRealTimers(); }
+});
+it('旧世代429は新世代を直接停止せず通信直前にcooldownを抑止し期限後だけ明示再開する', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(0);
+  try {
+    let finish!: (value: Response) => void;
+    const fetcher = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }))
+      .mockImplementation(async () => new Response(JSON.stringify(apiResponse())));
+    const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic' });
+    await moderation.enable(); moderation.observe([chatPost('old')]);
+    await vi.advanceTimersByTimeAsync(50000);
+    const pending = moderation.evaluate('old'); await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(10001);
+    moderation.stop(); expect(await moderation.enable()).toEqual({ ok: true });
+    moderation.observe([chatPost('new', 60001)]);
+    finish(new Response('{}', { status: 429, headers: { 'Retry-After': '30' } }));
+    expect(await pending).toMatchObject({ ok: false, error: { code: 'aborted' } });
+    const suppressed = await moderation.evaluate('new');
+    expect(suppressed).toMatchObject({ ok: true, value: { jev: 'failed', reasons: [], error: { code: 'rateLimited', retryAfterMillis: 30000 } } });
+    if (suppressed.ok) {
+      expect(suppressed.value.malicious).toBeUndefined(); expect(suppressed.value.evaluation).toBeUndefined();
+    }
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(await moderation.evaluate('new')).toEqual(suppressed);
+    expect(await moderation.enable()).toMatchObject({ ok: false, error: { code: 'rateLimited', retryAfterMillis: 30000 } });
+    await vi.advanceTimersByTimeAsync(29999);
+    expect(await moderation.enable()).toMatchObject({ ok: false, error: { code: 'rateLimited', retryAfterMillis: 1 } });
+    moderation.observe([chatPost('still-stopped', 90000)]);
+    expect(await moderation.evaluate('still-stopped')).toMatchObject({ ok: true, value: { jev: 'disabled' } });
+    await vi.advanceTimersByTimeAsync(1);
+    moderation.observe([chatPost('no-auto-resume', 90001)]);
+    expect(await moderation.evaluate('no-auto-resume')).toMatchObject({ ok: true, value: { jev: 'disabled' } });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(await moderation.enable()).toEqual({ ok: true });
+    moderation.observe([chatPost('resumed', 90001)]);
+    expect(await moderation.evaluate('resumed')).toMatchObject({ ok: true, value: { jev: 'evaluated' } });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    moderation.reset();
+  } finally { vi.useRealTimers(); }
+});
+it('大量観測の判定記録も10000件までで、保持外IDを正常判定にしない', async () => {
+  const moderation = createModeration({ client: createJevClient(vi.fn()), readKey: async () => undefined });
+  moderation.observe(Array.from({ length: 10001 }, (_, i) => ({ ...chatPost(`many-${i}`, 0, `author-${i}`), publishedAt: undefined })));
+  expect(await moderation.evaluate('many-9999')).toMatchObject({ ok: true, value: { jev: 'disabled' } });
+  expect(await moderation.evaluate('many-10000')).toMatchObject({ ok: false });
+  moderation.reset();
+});
+it('処理中が長くてもidleで未評価queueを解放し遅延結果で新しい同IDを評価しない', async () => {
+  vi.useFakeTimers();
+  try {
+    let finish!: (value: Awaited<ReturnType<ReturnType<typeof createJevClient>['evaluate']>>) => void;
+    const client = { evaluate: vi.fn(() => new Promise<Awaited<ReturnType<ReturnType<typeof createJevClient>['evaluate']>>>(resolve => { finish = resolve; })) };
+    const moderation = createModeration({ client, readKey: async () => 'synthetic' });
+    await moderation.enable(); moderation.observe([chatPost('active'), chatPost('waiting', 1)]);
+    const active = moderation.evaluate('active'); const waiting = moderation.evaluate('waiting');
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(60001);
+    let resolved = false;
+    void waiting.then(() => { resolved = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    const expiredWhileActive = resolved;
+    moderation.observe([chatPost('active', 2, 'new-author')]);
+    finish({ ok: false, error: { code: 'network' } });
+    expect(await active).toMatchObject({ ok: true, value: { authorChannelId: 'fixture-author', jev: 'failed', error: { code: 'network' } } }); await waiting;
+    expect(await moderation.evaluate('active')).toMatchObject({ ok: true, value: { authorChannelId: 'new-author', jev: 'disabled' } });
+    expect(expiredWhileActive).toBe(true);
+    expect(client.evaluate).toHaveBeenCalledTimes(1);
+    moderation.reset();
+  } finally { vi.useRealTimers(); }
+});
+it('idleで判定記録を破棄し遅延悪質応答も期限切れIDへ返さない', async () => {
+  vi.useFakeTimers();
+  try {
+    let finish!: (value: Response) => void;
+    const fetcher = vi.fn(() => new Promise<Response>(resolve => { finish = resolve; }));
+    const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic' });
+    await moderation.enable(); moderation.observe([chatPost('old')]);
+    await vi.advanceTimersByTimeAsync(50000);
+    const pending = moderation.evaluate('old');
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(10001);
+    finish(new Response(JSON.stringify(apiResponse({ attack: 1 }))));
+    expect(await pending).toMatchObject({ ok: false });
+    expect(await moderation.evaluate('old')).toMatchObject({ ok: false, error: { code: 'forbidden' } });
+    moderation.reset();
+  } finally { vi.useRealTimers(); }
+});
+it('判定待ち200件を超えた要求は即時拒否し正常判定にしない', async () => {
+  let finish!: (value: Response) => void;
+  const fetcher = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }))
+    .mockImplementation(async () => new Response(JSON.stringify(apiResponse())));
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic' });
+  await moderation.enable();
+  moderation.observe(Array.from({ length: 201 }, (_, i) => chatPost(`q-${i}`, i, `author-${i}`)));
+  const queued = Array.from({ length: 200 }, (_, i) => moderation.evaluate(`q-${i}`));
+  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+  const overflow = moderation.evaluate('q-200');
+  const result = await Promise.race([overflow, new Promise(resolve => setTimeout(() => resolve('blocked'), 20))]);
+  moderation.stop(); finish(new Response(JSON.stringify(apiResponse())));
+  await Promise.all(queued); await overflow; moderation.reset();
+  expect(result).toMatchObject({ ok: false });
+});
 it('storage変更通知より先にキー差替えを検出しても停止し同IDを再送信しない', async () => {
   const readKey = vi.fn().mockResolvedValueOnce('synthetic').mockResolvedValueOnce('synthetic').mockResolvedValue('replacement');
   const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify(apiResponse({ attack: 1 }))));

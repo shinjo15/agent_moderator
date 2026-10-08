@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { createHistory } from '../src/jev/history';
 import type { ChatMessage } from '../src/youtube/contracts';
 const post = (id: string, ms: number, authorChannelId = 'a'): ChatMessage => ({ id, authorChannelId, type: 'textMessageEvent', text: `本文${id}`, publishedAt: new Date(Date.UTC(2026, 0, 1) + ms).toISOString() });
@@ -13,6 +13,44 @@ it('ページをまたぐ同一author10件/10秒ちょうどは連投、重複ID
   expect(JSON.stringify(context.state)).not.toMatch(/authorChannelId|"id"|other/);
 });
 export { post };
+it('大量の異なる投稿者と時刻不明inputでも本文・IDを上限以上保持せずidleで再利用可能になる', async () => {
+  vi.useFakeTimers();
+  try {
+    const history = createHistory();
+    for (let i = 0; i < 12000; i++) history.add({ ...post(`many-${i}`, 0, `author-${i}`), publishedAt: undefined });
+    expect(history.context('many-0')).toBeDefined();
+    expect(history.context('many-9999')).toBeDefined();
+    expect(history.context('many-10000')).toBeUndefined();
+    expect(history.context('many-11999')).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(60001);
+    expect(history.context('many-0')).toBeUndefined();
+    expect(history.add(post('many-0', 0))).toMatchObject({ burst: 'notObserved', state: { history: [] } });
+    history.clear();
+  } finally { vi.useRealTimers(); }
+});
+it('実経過60秒ちょうども投稿日ルールのinclusive履歴を保持する', async () => {
+  vi.useFakeTimers();
+  try {
+    const history = createHistory();
+    history.add(post('edge-received', 0));
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(history.add(post('target-received', 60000))!.state.history.map(entry => entry.text)).toEqual(['本文edge-received']);
+    history.clear();
+  } finally { vi.useRealTimers(); }
+});
+it('idle中も未来時刻・時刻不明の本文を受信後60秒で解放する', async () => {
+  vi.useFakeTimers();
+  try {
+    const history = createHistory();
+    history.add(post('future', 864000000));
+    history.add({ ...post('unknown', 0, 'b'), publishedAt: undefined });
+    expect(history.context('future')).toBeDefined();
+    await vi.advanceTimersByTimeAsync(60001);
+    expect(history.context('future')).toBeUndefined();
+    expect(history.context('unknown')).toBeUndefined();
+    history.clear();
+  } finally { vi.useRealTimers(); }
+});
 it('IDから保持中の対象だけを最小stateへ対応付け、失われた本文は復元しない', () => {
   const history = createHistory();
   history.add(post('a', 0)); history.add(post('b', 10000));
