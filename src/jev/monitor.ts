@@ -1,19 +1,29 @@
 import type { createModerationTransport } from './runtime-transport';
-import { definitions, type Category } from './policy';
+import { categories, definitions, type Category } from './policy';
 import type { JevError } from './contracts';
+import { createNotice } from '../ui-notice';
 const failures: Record<JevError['code'], string> = {
-  missingKey: 'Jevキーを設定してください。', auth: 'Jevキーの認証に失敗しました。', validation: 'Jevが要求を受け付けませんでした。',
-  rateLimited: 'Jevの利用制限です。指定待機時間後に明示再開してください。', overloaded: 'Jevが混雑しています。指定待機時間後に明示再開してください。',
-  network: 'Jevとの通信に失敗しました。', invalidResponse: 'Jevの応答が不正です。', aborted: 'Jev判定を停止しました。', api: 'Jev判定に失敗しました。',
+  missingKey: '設定でJev APIキーを保存してください。', auth: 'Jev APIキーの認証に失敗しました。設定でキーを確認し、保存し直してください。', validation: 'Jevに判定を依頼できませんでした。時間をおいて再開し、問題が続く場合は拡張機能の更新を確認してください。',
+  rateLimited: 'Jevの利用制限です。時間をおいて再開ボタンを押してください。', overloaded: 'Jevが混雑しています。時間をおいて再開ボタンを押してください。',
+  network: 'Jevとの通信に失敗しました。接続を確認し、再開ボタンを押してください。', invalidResponse: 'Jevの判定結果を確認できませんでした。時間をおいて再開ボタンを押してください。', aborted: 'Jev判定を停止しました。再開ボタンを押してください。', api: 'Jev判定に失敗しました。時間をおいて再開ボタンを押してください。',
 };
 export function createJevPanel(main: HTMLElement, transport: ReturnType<typeof createModerationTransport>) {
   const section = document.createElement('section');
-  const notice = document.createElement('p');
-  notice.textContent = 'Jev判定は明示有効化した後の新着のみ。取得済みの同一投稿者の直近60秒以内、対象を含め最大20件の本文と投稿時刻のみをJevへ送信します。ID・他の投稿者・キーは投稿データに含めません。Jev利用料は利用者負担です。1件ずつ全項目を1回で評価し、自動再試行しません。悪質と確定した投稿者をこの配信でローカル非表示にします。BAN・投稿削除は行いません。連投は取得済み投稿時刻からアプリで判定します。';
+  section.className = 'jev-controls';
+  const notice = createNotice('monitor-note', [
+    'Jev判定を有効にすると、コメントをJevへ送信します。利用料金は利用者負担です。',
+  ], [
+    '有効にした後に取得するコメントだけを判定します。同じ投稿者の直近60秒以内・対象を含め最大20件の本文と投稿時刻のみを送信します。投稿者ID・他の投稿者のコメント・APIキーは投稿データに含めません。',
+    '1件につき7項目を1回の通信で判定します。失敗しても自動では再送しません。',
+    '悪質と判定した投稿者を、この配信のあなたの画面だけで非表示にします。YouTube上のBANやコメント削除はしません。',
+    '同じ投稿者の10秒以内10件以上の連投は、取得した投稿時刻を使い、この拡張機能で判定します。',
+  ]);
   const enable = document.createElement('button'); enable.textContent = 'Jev判定を有効化・再開'; enable.disabled = true;
   const disable = document.createElement('button'); disable.textContent = 'Jev判定を停止'; disable.disabled = true;
+  enable.type = 'button'; disable.type = 'button';
   const status = document.createElement('p'); status.dataset.testid = 'jev-status'; status.setAttribute('aria-live', 'polite'); status.textContent = 'Jev未有効化：外部送信しません。';
-  section.append(notice, enable, disable, status); main.append(section);
+  const actions = document.createElement('div'); actions.className = 'monitor-actions'; actions.append(enable, disable);
+  section.append(actions, status, notice); main.append(section);
   let generation = 0;
   let enabled = false;
   let valid = false;
@@ -21,9 +31,9 @@ export function createJevPanel(main: HTMLElement, transport: ReturnType<typeof c
   let queue: Promise<void> = Promise.resolve();
   const pending = new Set<HTMLElement>();
   function buttons() { enable.disabled = !valid || enabling || enabled; disable.disabled = !enabled && !enabling; }
-  function stop(message = 'Jev判定を停止しました。明示的に有効化・再開してください。', collection = false) {
+  function stop(message = 'Jev判定を停止しました。再開するには「Jev判定を有効化・再開」を押してください。', collection = false) {
     generation++; enabled = false; enabling = false; status.textContent = message; buttons();
-    for (const label of pending) label.textContent = ' — 未判定：停止しました。';
+    for (const label of pending) label.textContent = '未判定：停止しました。';
     pending.clear(); void transport.stop(collection);
   }
   enable.addEventListener('click', () => {
@@ -38,22 +48,37 @@ export function createJevPanel(main: HTMLElement, transport: ReturnType<typeof c
   });
   disable.addEventListener('click', () => stop());
   function add(id: string, author: string, item: HTMLElement) {
-    const label = document.createElement('span'); label.textContent = ' — 未判定'; item.append(label); pending.add(label);
+    const display = document.createElement('div'); display.className = 'chat-moderation';
+    const label = document.createElement('span'); label.className = 'moderation-status'; label.textContent = '未判定';
+    display.append(label); item.append(display); pending.add(label);
     const current = generation;
     queue = queue.then(async () => {
       if (current !== generation) return;
       const result = await transport.evaluate(id, author);
       if (current !== generation) return;
       pending.delete(label);
-      if (!result) { label.textContent = ' — 未判定：対象・履歴なし、または判定中断'; return; }
+      if (!result) { label.textContent = '未判定：必要なコメントを確認できないか、判定が中断されました。'; return; }
       const outcome = result.malicious === true ? `悪質（${result.reasons.map(reason => reason === 'burst' ? '10秒以内10件以上の連投' : definitions[reason as Category]).join('、')}）`
         : result.malicious === false ? '該当なし' : '未判定';
-      const values = result.evaluation ? ` / 項目評価: ${Object.entries(result.evaluation.values).map(([key, value]) => `${definitions[key as Category]}=${value}`).join('、')}` : '';
-      const time = result.burst === 'unavailable' ? ' / 投稿時刻の条件は判定不能' : '';
+      const time = result.burst === 'unavailable' ? ' / 投稿時刻を確認できないため、連投は判定できません' : '';
       const jev = result.jev === 'failed' ? ` / Jev判定失敗: ${failures[result.error!.code]}`
-        : result.jev === 'disabled' ? ' / Jev未有効化・停止中' : result.jev === 'unjudged' ? ' / Jev未判定：履歴保持窓外またはローカル連投確定' : ' / Jev判定済み';
-      label.textContent = ` — ${outcome}${jev}${time}${values}`;
-      if (result.jev === 'failed') { enabled = false; status.textContent = `${failures[result.error!.code]} Jev通信を停止しました。明示再開が必要です。`; buttons(); }
+        : result.jev === 'disabled' ? ' / Jev判定は未開始・停止中' : result.jev === 'unjudged' ? ' / Jev判定は未実施' : ' / Jev判定済み';
+      label.textContent = `${outcome}${jev}${time}`;
+      if (result.malicious === true) label.classList.add('is-malicious');
+      if (result.evaluation) {
+        const badge = document.createElement('span'); badge.className = 'score-badge';
+        badge.textContent = `判定スコア ${Math.max(...categories.map(key => result.evaluation!.values[key])).toFixed(2)}`;
+        const details = document.createElement('details'); details.className = 'score-details';
+        const summary = document.createElement('summary'); summary.textContent = '項目別スコア';
+        const values = document.createElement('dl');
+        for (const key of categories) {
+          const name = document.createElement('dt'); name.textContent = definitions[key];
+          const value = document.createElement('dd'); value.textContent = String(result.evaluation.values[key]);
+          values.append(name, value);
+        }
+        details.append(summary, values); display.append(badge, details);
+      }
+      if (result.jev === 'failed') { enabled = false; status.textContent = `${failures[result.error!.code]} 判定を停止しています。自動では再開しません。`; buttons(); }
 
     });
   }

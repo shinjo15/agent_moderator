@@ -53,7 +53,7 @@ for (const fails of [false, true]) {
       await page.getByLabel('YouTube APIキー').fill('synthetic-initial-youtube-draft');
       await worker.evaluate(() => (globalThis as unknown as { releaseInitialRead: () => void }).releaseInitialRead());
       await expect(page.getByRole('status')).toHaveText(fails ?
-        'キー設定の処理に失敗しました。再試行してください。' : '設定を確認しました。');
+        'APIキーの設定に失敗しました。もう一度操作してください。保存する場合はキーを入力し直してください。' : 'APIキーの保存状況を確認しました。');
       await expect(page.getByLabel('Jev APIキー')).toHaveValue('synthetic-initial-jev-draft');
       await expect(page.getByLabel('YouTube APIキー')).toHaveValue('synthetic-initial-youtube-draft');
     });
@@ -78,7 +78,8 @@ for (const operation of ['save', 'delete', 'failed-save'] as const) {
         await expect(page.getByLabel(`${name} APIキー`)).toHaveValue('');
         await expect(page.getByLabel(`${other} APIキー`)).toHaveValue('synthetic-unsubmitted-draft');
         await expect(page.getByRole('status')).toHaveText(operation === 'failed-save' ?
-          'キー設定の処理に失敗しました。再試行してください。' : '設定を確認しました。');
+          'APIキーの設定に失敗しました。もう一度操作してください。保存する場合はキーを入力し直してください。' : operation === 'save'
+            ? 'APIキーの保存処理が完了しました。有効性は確認していません。' : 'APIキーの削除処理が完了しました。');
       }
     });
   });
@@ -123,7 +124,7 @@ test('実contentのisolated contextではlocal読取不可、init/設定/取得�
     const jevDenied = await cdp.send('Runtime.evaluate', { contextId: world.id, awaitPromise: true, returnByValue: true,
       expression: `(async () => Promise.all(['jev.enable', 'jev.evaluate', 'jev.disable'].map(type => chrome.runtime.sendMessage({type, id: 'forged'}))))()` });
     expect(jevDenied.exceptionDetails).toBeUndefined();
-    expect(jevDenied.result.value).toEqual(Array.from({ length: 3 }, () => ({ ok: false, error: { code: 'forbidden', message: 'このチャットへのアクセスが許可されていません。' } })));
+    expect(jevDenied.result.value).toEqual(Array.from({ length: 3 }, () => ({ ok: false, error: { code: 'forbidden', message: 'このチャットを取得できません。視聴タブから対象を選び直してください。' } })));
     expect(await worker.evaluate(async () => (await chrome.storage.local.get(['apiKey.youtube']))['apiKey.youtube'] === 'synthetic-content-protected')).toBe(true);
     // The ordinary page world has no extension runtime / storage access.
     expect(await page.evaluate(() => {
@@ -147,7 +148,7 @@ test('保存失敗時に固定文言だけ表示し入力・応答・ログへ�
     });
     await page.getByLabel('YouTube APIキー').fill('synthetic-error-containing-private-key');
     await page.getByRole('button', { name: 'YouTubeキーを保存' }).click();
-    await expect(page.getByRole('status')).toHaveText('キー設定の処理に失敗しました。再試行してください。');
+    await expect(page.getByRole('status')).toHaveText('APIキーの設定に失敗しました。もう一度操作してください。保存する場合はキーを入力し直してください。');
     await expect(page.getByLabel('YouTube APIキー')).toHaveValue('');
     expect(await page.evaluate(() => chrome.runtime.sendMessage({ type: 'credentials.save', provider: 'youtube', value: 'synthetic-error-containing-private-key' }))).toEqual({ ok: false, error: 'キー設定の処理に失敗しました。再試行してください。' });
     expect(await page.locator('body').textContent()).not.toContain('synthetic-error-containing-private-key');

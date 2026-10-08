@@ -1,14 +1,18 @@
 import { runtime } from './extension-runtime';
 import { platform } from './youtube/extension-platform';
 import { videoIdFromUrl } from './youtube/video-id';
+import { createNotice } from './ui-notice';
 
 const heading = document.createElement('h1');
 heading.textContent = 'Agent Moderator';
-const notice = document.createElement('p');
-notice.textContent = '配信別に投稿者を画面内で非表示にします。監視停止後も非表示は維持され、monitorから解除できます。YouTube上でのBAN・コメント削除は行いません。';
-const settings = document.createElement('a');
+const notice = createNotice('popup-notice', [
+  '悪質と判定した投稿者のコメントを、配信ごとにあなたの画面だけで非表示にします。',
+  '取得を停止しても非表示は続き、チャット画面で解除できます。YouTube上のBANやコメント削除はしません。',
+]);
+const settings = document.createElement('button');
 settings.textContent = '設定を開く';
-settings.href = 'options.html';
+settings.type = 'button';
+settings.addEventListener('click', () => { window.location.assign('options.html'); });
 document.querySelector('main')!.append(heading, notice, settings);
 const selection = document.createElement('p');
 const open = document.createElement('button');

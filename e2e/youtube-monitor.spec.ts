@@ -43,7 +43,7 @@ test('production MV3: activeTabから選択しYouTubeタブ前面でもfixture�
     });
     const options = await context.newPage();
     await options.goto(`chrome-extension://${id}/options.html`);
-    await expect(options.getByText(/この版では取得開始時にYouTube APIへ通信/)).toBeVisible();
+    await expect(options.getByText(/「取得を開始」でYouTubeへ通信します/)).toBeVisible();
     expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'youtube.resolve', videoId: 'abcdefghijk', requestId: 'forbidden' })))
       .toMatchObject({ ok: false, error: { code: 'forbidden' } });
     await options.getByLabel('YouTube APIキー').fill('fixture-not-real-key');
@@ -94,14 +94,14 @@ test('production MV3: activeTabから選択しYouTubeタブ前面でもfixture�
     expect(tokens).toHaveLength(deletedCount);
     mode = 'quota';
     await monitor.getByRole('button', { name: '取得を開始' }).click();
-    await expect(monitor.getByRole('status')).toHaveText('YouTube APIの利用上限に達しました。', { timeout: 12000 });
+    await expect(monitor.getByRole('status')).toHaveText('YouTube APIの利用上限に達しました。利用枠を確認し、回復してから取得を再開してください。', { timeout: 12000 });
     await expect(monitor.locator('body')).not.toContainText('private-provider-message');
     const quotaCount = tokens.length;
     await youtube.waitForTimeout(5500);
     expect(tokens).toHaveLength(quotaCount);
     mode = 'invalid';
     await monitor.getByRole('button', { name: '取得を開始' }).click();
-    await expect(monitor.getByRole('status')).toHaveText('YouTube APIの応答が不正なため停止しました。', { timeout: 10000 });
+    await expect(monitor.getByRole('status')).toHaveText('YouTubeからのデータを確認できず、取得を停止しました。時間をおいて取得を再開してください。', { timeout: 10000 });
     await youtube.goto('https://www.youtube.com/watch?v=zyxwvutsrqp');
     await expect(monitor.getByRole('button', { name: '取得を開始' })).toBeDisabled();
     await expect(monitor.getByText(/視聴タブが変更または閉じられました/)).toBeVisible();
