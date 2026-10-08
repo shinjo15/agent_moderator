@@ -9,15 +9,18 @@ import { createHiddenAuthors } from './hidden-authors/store';
 import { createHiddenAuthorHandler } from './hidden-authors/handler';
 import { createFilterSettings } from './jev/settings';
 import { createFilterSettingsHandler } from './jev/settings-handler';
+import { CONFIRMATION_KEY, createConfirmation } from './confirmation';
 
 const filterSettings = createFilterSettings({ storage: platform.storage.local, initialize: initializeCredentialStorage });
+const confirmation = createConfirmation({ storage: platform.storage.local, initialize: initializeCredentialStorage });
 const filter = createFilterSettingsHandler({ settings: filterSettings, runtime });
-const moderation = createModeration({ client: createJevClient(), readKey: readJevApiKeyForBackground, session: platform.storage.session, readThreshold: filterSettings.read });
+const moderation = createModeration({ client: createJevClient(), readKey: readJevApiKeyForBackground, session: platform.storage.session, readThreshold: filterSettings.read, readConfirmation: confirmation.read });
 const hiddenAuthors = createHiddenAuthors({ storage: platform.storage.local, initialize: initializeCredentialStorage });
 const hidden = createHiddenAuthorHandler({ store: hiddenAuthors, tabs: platform.tabs, session: platform.storage.session, runtime });
-const youtube = createYouTubeHandler({ session: platform.storage.session, tabs: platform.tabs, runtime, moderation,
+const youtube = createYouTubeHandler({ session: platform.storage.session, tabs: platform.tabs, runtime, moderation, readConfirmation: confirmation.read,
   hiddenAuthors, client: createYouTubeClient(), initialize: initializeCredentialStorage, readApiKey: readYouTubeApiKeyForBackground });
 platform.storage.onChanged?.addListener((changes, area) => {
+  if (area === 'local' && CONFIRMATION_KEY in changes) void youtube.confirmationChanged().catch(() => {});
   if (area === 'local' && 'apiKey.youtube' in changes) void youtube.credentialsChanged().catch(() => {});
   if (area === 'local' && 'apiKey.jev' in changes) {
     moderation.stop();
@@ -42,6 +45,9 @@ runtime.onMessageExternal.addListener((message, _sender, reply) => {
 });
 
 runtime.onMessage.addListener((message, sender, reply) => {
+  if (typeof message === 'object' && message !== null && 'type' in message && typeof message.type === 'string' && message.type.startsWith('confirmation.')) {
+    void confirmation.handle(message, sender, runtime).then(reply); return true;
+  }
   if (typeof message === 'object' && message !== null && 'type' in message && typeof message.type === 'string' && message.type.startsWith('settings.')) {
     void filter.handle(message, sender).then(reply); return true;
   }

@@ -2,6 +2,7 @@ import { runtime } from './extension-runtime';
 import type { ApiKeyProvider, CredentialStatus } from './credential-store';
 import { createFilterSettingsPanel } from './jev/options';
 import { createNotice } from './ui-notice';
+import { createConfirmationPanel } from './confirmation-panel';
 
 const heading = document.createElement('h1');
 heading.textContent = 'Agent Moderator 設定';
@@ -17,6 +18,7 @@ const result = document.createElement('p');
 result.setAttribute('role', 'status');
 const main = document.querySelector('main')!;
 main.append(heading, result);
+createConfirmationPanel(main, runtime);
 const fields = new Map<ApiKeyProvider, { input: HTMLInputElement; status: HTMLParagraphElement }>();
 const buttons: HTMLButtonElement[] = [];
 let busy = false;

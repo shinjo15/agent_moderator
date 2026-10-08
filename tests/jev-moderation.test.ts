@@ -1,7 +1,56 @@
 import { expect, it, vi } from 'vitest';
-import { createModeration } from '../src/jev/moderation';
+import { createModeration as createUnconfirmedModeration } from '../src/jev/moderation';
 import { createJevClient } from '../src/jev/client';
 import { apiResponse, chatPost } from './fixtures/jev';
+// Existing core scenarios represent an explicitly confirmed fixture user.
+const createModeration = (deps: Parameters<typeof createUnconfirmedModeration>[0]) =>
+  createUnconfirmedModeration({ readConfirmation: async () => true, ...deps });
+
+it('Jevは未確認の有効化を拒否し送信直前の確認喪失でも待機分を送らない', async () => {
+  const readConfirmation = vi.fn(async () => false);
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(apiResponse())));
+  const moderation = createUnconfirmedModeration({ readConfirmation, client: createJevClient(fetcher), readKey: async () => 'synthetic' });
+  expect(await moderation.enable()).toMatchObject({ ok: false, error: { code: 'confirmationRequired' } });
+  expect(fetcher).not.toHaveBeenCalled();
+  readConfirmation.mockResolvedValue(true);
+  expect(await moderation.enable()).toEqual({ ok: true });
+  moderation.observe([chatPost('first'), chatPost('queued', 1)]);
+  readConfirmation.mockResolvedValue(false);
+  const first = moderation.evaluate('first'); const queued = moderation.evaluate('queued');
+  expect(await first).toMatchObject({ ok: true, value: { jev: 'failed', error: { code: 'confirmationRequired' } } });
+  await queued;
+  expect(fetcher).not.toHaveBeenCalled(); moderation.reset();
+});
+
+it('再有効化の確認読取失敗は既存enabledも停止し、読取復旧だけでは送信を再開しない', async () => {
+  const readConfirmation = vi.fn(async () => true);
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(apiResponse())));
+  const moderation = createUnconfirmedModeration({ readConfirmation, client: createJevClient(fetcher), readKey: async () => 'synthetic' });
+  await moderation.enable(); moderation.observe([chatPost('before')]);
+  readConfirmation.mockRejectedValueOnce(new Error('private'));
+  expect(await moderation.enable()).toMatchObject({ ok: false });
+  moderation.observe([chatPost('after', 1)]);
+  await moderation.evaluate('after');
+  expect(fetcher).not.toHaveBeenCalled(); moderation.reset();
+});
+
+it('送信前確認の読取中に観測期限が切れても本文を送信しない', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(0);
+  try {
+    let release!: (confirmed: boolean) => void;
+    const readConfirmation = vi.fn(async () => true);
+    const fetcher = vi.fn(async () => new Response(JSON.stringify(apiResponse())));
+    const moderation = createUnconfirmedModeration({ readConfirmation, client: createJevClient(fetcher), readKey: async () => 'synthetic' });
+    await moderation.enable(); moderation.observe([chatPost('expired-during-confirmation')]);
+    readConfirmation.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    const pending = moderation.evaluate('expired-during-confirmation');
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(60001); release(true);
+    await pending;
+    expect(fetcher).not.toHaveBeenCalled(); moderation.reset();
+  } finally { vi.useRealTimers(); }
+});
+
 it.each([429, 401])('観測期限切れ後のHTTP%iでもcurrent失敗を通知し期限切れ記録は復元しない', async status => {
   vi.useFakeTimers(); vi.setSystemTime(0);
   try {

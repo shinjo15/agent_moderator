@@ -10,7 +10,10 @@ it('一般利用者向けの日本語ポリシー案は更新日と未確定の�
   expect(text).toContain('# プライバシーポリシー（案）');
   expect(text).toMatch(/最終更新日：\d{4}-\d{2}-\d{2}（日本時間）/);
   expect(text).toContain('施行日：未定');
-  expect(text).toContain('未公開');
+  expect(text).toContain('GitHub mainに掲載中');
+  expect(text).not.toContain('公開ページへまだ反映していません');
+  expect(text).toContain('usage.confirmation');
+  expect(text).toContain('再確認');
   expect(text).not.toContain('Issue #5統合済み');
 });
 

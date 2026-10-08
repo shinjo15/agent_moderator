@@ -4,7 +4,7 @@ import type { ModerationResult } from './moderation';
 import { categories, decide, type Values } from './policy';
 import { validThreshold } from './threshold';
 const object = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-const errors = ['missingKey', 'auth', 'validation', 'rateLimited', 'overloaded', 'network', 'invalidResponse', 'aborted', 'api'];
+const errors = ['confirmationRequired', 'missingKey', 'auth', 'validation', 'rateLimited', 'overloaded', 'network', 'invalidResponse', 'aborted', 'api'];
 function error(value: unknown): JevError {
   if (!object(value) || !errors.includes(String(value.code))) return { code: 'network' };
   return { code: value.code as JevError['code'], ...(typeof value.retryAfterMillis === 'number' && Number.isFinite(value.retryAfterMillis) && value.retryAfterMillis >= 0 ? { retryAfterMillis: value.retryAfterMillis } : {}) };

@@ -7,6 +7,7 @@ import { createHiddenAuthorPanel } from './hidden-authors/monitor';
 import { MAX_VISIBLE_MESSAGES } from './retention';
 import { createNotice } from './ui-notice';
 import { createAuthorLabel } from './author-label';
+import { confirmationRequired } from './confirmation';
 
 const main = document.querySelector('main')!;
 const heading = document.createElement('h1');
@@ -106,6 +107,10 @@ window.addEventListener('pagehide', () => { jev.stop(undefined, true); monitor.s
 runtime.onMessage.addListener((message, sender) => {
   if (sender.id !== runtime.id || (sender.url !== undefined && sender.url !== runtime.getURL('background.js'))
     || typeof message !== 'object' || message === null || !('type' in message)) return false;
+  if (message.type === 'confirmation.changed') {
+    monitor.stop(); jev.stop(confirmationRequired, true);
+    status.textContent = '利用条件の確認状態が変更されたため停止しました。設定を確認し、明示的に再開してください。';
+  }
   if (message.type === 'youtube.credentialsChanged' && 'available' in message && typeof message.available === 'boolean') {
     jev.stop('YouTubeキー変更のためJev判定も停止しました。', true);
     initializationGeneration++;

@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { apiResponse } from '../tests/fixtures/jev';
+import { confirmUsage } from './fixtures/confirm-usage';
 declare const chrome: { runtime: { sendMessage(m: unknown): Promise<unknown> }; tabs: { create(o: { url: string; active: boolean }): Promise<unknown> }; storage: { local: { get(keys: string[]): Promise<Record<string, unknown>>; set(v: Record<string, unknown>): Promise<void> } } };
 const video = 'abcdefghijk';
 const a = 'UCabcdefghijklmnopqrstuv'; const b = 'UCzyxwvutsrqponmlkjihgfe';
@@ -60,6 +61,7 @@ test('MV3 names: 公式応答fixture→判定→名前永続→browser再起動�
       return route.fulfill({ json: apiResponse({ attack: state.target.text === '今日も楽しみです' ? 0.1 : 1 }) });
     });
     const options = await context.newPage(); await options.goto(`chrome-extension://${id}/options.html`);
+    await confirmUsage(options);
     for (const provider of ['YouTube', 'Jev']) {
       await options.getByLabel(`${provider} APIキー`).fill(`synthetic-${provider}`);
       await options.getByRole('button', { name: `${provider}キーを保存`, exact: true }).click();

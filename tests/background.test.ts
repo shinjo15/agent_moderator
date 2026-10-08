@@ -30,6 +30,94 @@ afterEach(() => {
   for (const key of Object.keys(data)) delete data[key];
 });
 
+it('利用条件確認はversionのみ保存し再起動後もpublic状態だけを返す', async () => {
+  await start();
+  expect(await send({ type: 'confirmation.get' })).toEqual({ ok: true, value: { confirmed: false, version: 1 } });
+  expect(await send({ type: 'confirmation.confirm', version: 1 })).toEqual({ ok: true, value: { confirmed: true, version: 1 } });
+  expect(data['usage.confirmation']).toEqual({ version: 1 });
+  await send({ type: 'credentials.save', provider: 'youtube', value: 'synthetic-private' });
+  await send({ type: 'credentials.delete', provider: 'youtube' });
+  expect(await send({ type: 'confirmation.get' })).toEqual({ ok: true, value: { confirmed: true, version: 1 } });
+  vi.resetModules(); await start();
+  expect(await send({ type: 'confirmation.get' })).toEqual({ ok: true, value: { confirmed: true, version: 1 } });
+});
+
+it('利用条件確認の読取・保存・旧版payloadと権限をfail closedにする', async () => {
+  await start();
+  for (const value of [undefined, null, true, 1, '1', [], { version: 0 }, { version: '1' }, { version: 1, key: 'synthetic-private' }]) {
+    data['usage.confirmation'] = value;
+    expect(await send({ type: 'confirmation.get' })).toEqual({ ok: true, value: { confirmed: false, version: 1 } });
+  }
+  local.get.mockRejectedValueOnce(new Error('synthetic-private'));
+  expect(await send({ type: 'confirmation.get' })).toMatchObject({ ok: true, value: { confirmed: false } });
+  for (const message of [{ type: 'confirmation.confirm', version: 0 }, { type: 'confirmation.confirm', version: '1' },
+    { type: 'confirmation.confirm', version: 1, extra: true }, { type: 'confirmation.get', extra: true }]) {
+    expect(await send(message)).toMatchObject({ ok: false });
+  }
+  for (const sender of [{ id: 'other', url: trusted.url }, { ...trusted, url: `${trusted.url}?x` },
+    { ...trusted, url: 'https://www.youtube.com/live_chat' }, { ...trusted, url: trusted.url.replace('options', 'popup') },
+    { ...trusted, url: trusted.url.replace('options', 'monitor') }]) {
+    expect(await send({ type: 'confirmation.confirm', version: 1 }, sender)).toMatchObject({ ok: false });
+  }
+  expect(await send({ type: 'confirmation.confirm', version: 1 }, trusted, true)).toMatchObject({ ok: false });
+  expect(local.set).not.toHaveBeenCalled();
+  local.set.mockRejectedValueOnce(new Error('synthetic-private'));
+  expect(await send({ type: 'confirmation.confirm', version: 1 })).toMatchObject({ ok: false });
+  expect(await send({ type: 'confirmation.get' })).toMatchObject({ ok: true, value: { confirmed: false } });
+  local.set.mockResolvedValueOnce(undefined);
+  expect(await send({ type: 'confirmation.confirm', version: 1 })).toMatchObject({ ok: false });
+});
+
+it('確認保存のreadback失敗は再起動しても未確認とし既存キー・閾値・非表示を消さない', async () => {
+  await start();
+  data['apiKey.youtube'] = 'synthetic-private'; data['moderation.threshold'] = 0.731;
+  data['hiddenAuthors.abcdefghijk'] = { ids: ['UCabcdefghijklmnopqrstuv'], revisions: {} };
+  local.get.mockRejectedValueOnce(new Error('synthetic-private'));
+  expect(await send({ type: 'confirmation.confirm', version: 1 })).toMatchObject({ ok: false });
+  vi.resetModules(); await start();
+  expect(await send({ type: 'confirmation.get' })).toMatchObject({ ok: true, value: { confirmed: false } });
+  expect(data['apiKey.youtube']).toBe('synthetic-private'); expect(data['moderation.threshold']).toBe(0.731);
+  expect(data['hiddenAuthors.abcdefghijk']).toEqual({ ids: ['UCabcdefghijklmnopqrstuv'], revisions: {} });
+});
+
+it('確認保存のreadback拒否とrollback拒否が重なってもworker再作成で確認済みに戻らない', async () => {
+  await start();
+  local.set.mockImplementationOnce(async values => { Object.assign(data, values); })
+    .mockRejectedValueOnce(new Error('rollback refused'));
+  local.get.mockRejectedValueOnce(new Error('readback refused'));
+  expect(await send({ type: 'confirmation.confirm', version: 1 })).toMatchObject({ ok: false });
+  expect(await send({ type: 'confirmation.get' })).toMatchObject({ ok: true, value: { confirmed: false } });
+  vi.resetModules(); await start();
+  expect(await send({ type: 'confirmation.get' })).toMatchObject({ ok: true, value: { confirmed: false } });
+  expect(await send({ type: 'confirmation.confirm', version: 1 })).toMatchObject({ ok: true, value: { confirmed: true } });
+});
+
+it('確定書込の成功応答後は追加readbackの故障を保存失敗として返さない', async () => {
+  await start();
+  local.set.mockImplementationOnce(async values => { Object.assign(data, values); })
+    .mockImplementationOnce(async values => {
+      Object.assign(data, values);
+      local.get.mockRejectedValueOnce(new Error('post-commit read unavailable'));
+    });
+  expect(await send({ type: 'confirmation.confirm', version: 1 })).toMatchObject({ ok: true, value: { confirmed: true } });
+  expect(await send({ type: 'confirmation.get' })).toMatchObject({ ok: true, value: { confirmed: false } });
+  vi.resetModules(); await start();
+  expect(await send({ type: 'confirmation.get' })).toMatchObject({ ok: true, value: { confirmed: true } });
+});
+
+it('保証限界: 最終書込が反映後に拒否しrollbackも拒否する故障は再作成後に区別できない', async () => {
+  await start();
+  local.set.mockImplementationOnce(async values => { Object.assign(data, values); })
+    .mockImplementationOnce(async values => { Object.assign(data, values); throw new Error('ambiguous commit'); })
+    .mockRejectedValueOnce(new Error('rollback unavailable'));
+  expect(await send({ type: 'confirmation.confirm', version: 1 })).toMatchObject({ ok: false });
+  expect(await send({ type: 'confirmation.get' })).toMatchObject({ ok: true, value: { confirmed: false } });
+  expect(data['usage.confirmation']).toEqual({ version: 1 });
+  vi.resetModules(); await start();
+  // This is a documented fault-model limit, not a claimed durable fail-closed success.
+  expect(await send({ type: 'confirmation.get' })).toMatchObject({ ok: true, value: { confirmed: true } });
+});
+
 it('フィルター設定はlegacy既定中でpublic値だけを返し保存・再起動readbackを維持する', async () => {
   await start();
   data['apiKey.jev'] = 'synthetic-private';
@@ -124,6 +212,8 @@ it('externalのsettings拒否だけauthorization codeを返しcredentials応答�
 it('trusted初期化失敗時は固定エラーのみ返しread/write/deleteしない', async () => {
   local.setAccessLevel.mockRejectedValue(new Error('synthetic-private-error'));
   await start();
+  expect(await send({ type: 'confirmation.get' })).toMatchObject({ ok: true, value: { confirmed: false } });
+  expect(await send({ type: 'confirmation.confirm', version: 1 })).toMatchObject({ ok: false });
   for (const message of [{ type: 'storage.init' },
     { type: 'credentials.save', provider: 'youtube', value: 'synthetic-private' },
     { type: 'credentials.delete', provider: 'youtube' }]) {
