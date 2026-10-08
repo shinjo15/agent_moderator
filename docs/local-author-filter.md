@@ -18,13 +18,16 @@
 
 ## 保存するもの・解除で残るもの
 
-backgroundの`src/hidden-authors/store.ts`だけが`chrome.storage.local`を操作する。保存keyは`hiddenAuthors.<video ID>`、値は`{ ids: string[], revisions: Record<string, number> }`。
+backgroundの`src/hidden-authors/store.ts`だけが`chrome.storage.local`を操作する。保存keyは`hiddenAuthors.<video ID>`、値は`{ ids: string[], revisions: Record<string, number>, displayNames?: Record<string, string> }`。既存のID-only recordもそのまま読み、一覧を読むだけでは書き換えない。
 
 - `ids`: その配信で非表示にするYouTube channel ID一覧。
 - `revisions`: authorごとの解除世代。未記録は0として扱い、解除時に増加する。観測時に捕捉したrevisionと登録時のrevisionが一致する場合だけ登録できる。
-- 解除後は`ids`から対象を除くが、video/authorに紐づくrevision metadataはlocalに残る。リストが空でも保存record自体は削除しない。「非表示解除」は当該投稿者に関する保存データの完全消去ではない。
+- `displayNames`: 非表示IDに紐づく既取得のYouTube表示名。公式`liveChatMessages.list`の`authorDetails.displayName`だけを利用する。既存requestは`part=id,snippet,authorDetails`、`fields`指定なしで、名前のための追加APIは使わない。登録時に名前を保存し、同じIDの取得済み名前が変わったときだけ更新する。欠落・不正な名前では既知の名前を消さない。
+- 取得コメントと下部の非表示投稿者一覧は名前を主表示にし、補足の「投稿者ID」を開くと内部IDを確認できる。未取得名・ID-only recordは「名前不明」と表示し、推測やAPI補完をしない。同名でも照合・解除は安定したchannel IDによって個別に行う。解除ボタンのaria-labelにも名前とIDを含める。
+- 名前更新もrevision/current世代を照合し、未登録IDの名前更新から非表示を新規登録しない。遅い判定の登録には同一video/author/revision/collectionに属する保持中の最新取得名を使い、cached判定から既存の名前を戻さない。名前と取得順は既存の60秒の観測Map内だけに保持し、TTLや件数上限を変更しない。
+- 解除後は`ids`と`displayNames`から対象を除くが、video/authorに紐づくrevision metadataはlocalに残る。リストが空でも保存record自体は削除しない。「非表示解除」は当該投稿者に関する保存データの完全消去ではない。
 - 自動期限、30日削除、同期、キー削除への連動消去、revisionを完全消去する専用UIは実装していない。利用条件の保留をこの実装で解消したとは扱わない。
-- 本文、表示名、DOM本文、message ID履歴、判定結果全体はこのstoreへ保存しない。sync/Web localStorageは使わない。
+- 本文、DOM本文、message ID履歴、判定結果全体はこのstoreへ保存しない。表示名だけを表示用metadataとして保存し、非表示コメントarchiveは追加しない。sync/Web localStorageは使わない。名前はJevのtarget/historyへ送らず、判定やidentity判断にも使わない。
 - キー用の`initializeCredentialStorage()`と同じ`TRUSTED_CONTEXTS`gateをawaitしてからlocalを読み書きする。contentからlocalを直接読むことは許可しない。
 
 観測ID/author/revision/collection世代の対応付けはworkerメモリ内。同一bindingでの既取得message IDは旧観測として扱うが、worker再起動を跨ぐmessage IDの重複排除は永続化していない。再起動後の公式初回取得が過去の投稿を含む場合、その再取得は新規観測となり得るため、「解除した過去のmessageが再起動後も絶対に再判定されない」とは保証しない。非表示IDと解除revisionの保持、本文/履歴・opt-inの非復元は別の契約である。
@@ -39,7 +42,7 @@ backgroundの`src/hidden-authors/store.ts`だけが`chrome.storage.local`を操�
 - `src/content-ids.ts`: MAIN側のrenderer識別のみ。Chrome API、キー、非表示一覧、本文取得・外部送信は扱わない。
 - `src/content.ts`: isolated側で対象videoのID一覧だけを受け取り、rendererの表示を変更・復元する。
 
-非表示IPCの成功応答は`{ ok: true, videoId, ids }`、拒否は`{ ok: false }`。キー、他videoの一覧、revision全体を応答へ載せない。
+contentへの非表示IPC成功応答は従来どおり`{ ok: true, videoId, ids }`、許可されたmonitorへの成功応答だけ`authors: { authorChannelId, displayName? }[]`を加える。拒否は`{ ok: false }`。キー、他videoの一覧、revision全体を応答へ載せない。UIはvideo/ID/名前の形状と対応を検証し、名前・IDを`textContent`で描画する。YouTube listのIPCも任意の名前を含む取得message形状を検証する。
 
 monitorの`hidden.list`はtype/videoIdの2フィールド、`hidden.remove`はtype/videoId/authorChannelIdの3フィールドだけ。同一拡張ID、完全一致のmonitor URL、sessionのmonitor tab binding、対象videoと現在watch/liveタブURLの一致を要求する。
 

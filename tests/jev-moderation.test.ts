@@ -9,7 +9,7 @@ it.each([429, 401])('観測期限切れ後のHTTP%iでもcurrent失敗を通知�
     const fetcher = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }))
       .mockImplementation(async () => new Response(JSON.stringify(apiResponse())));
     const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic' });
-    await moderation.enable(); moderation.observe([chatPost('expired')]);
+    await moderation.enable(); moderation.observe([{ ...chatPost('expired'), authorDisplayName: '期限切れ名前fixture' }]);
     await vi.advanceTimersByTimeAsync(50000);
     const pending = moderation.evaluate('expired');
     await vi.advanceTimersByTimeAsync(0);
@@ -21,7 +21,7 @@ it.each([429, 401])('観測期限切れ後のHTTP%iでもcurrent失敗を通知�
     if (failure.ok) {
       expect(failure.value.malicious).toBeUndefined(); expect(failure.value.evaluation).toBeUndefined();
     }
-    expect(JSON.stringify(failure)).not.toMatch(/日本語本文expired/);
+    expect(JSON.stringify(failure)).not.toMatch(/日本語本文expired|期限切れ名前fixture/);
     expect(await moderation.evaluate('expired')).toMatchObject({ ok: false, error: { code: 'forbidden' } });
     moderation.observe([chatPost('fresh', 60001)]);
     expect(await moderation.evaluate('fresh')).toMatchObject({ ok: true, value: { jev: 'disabled' } });
@@ -33,7 +33,7 @@ it.each([429, 401])('観測期限切れ後のHTTP%iでもcurrent失敗を通知�
     expect(await moderation.enable()).toEqual({ ok: true });
     moderation.observe([chatPost('resumed', 90001)]);
     expect(await moderation.evaluate('resumed')).toMatchObject({ ok: true, value: { jev: 'evaluated' } });
-    expect(fetcher.mock.calls[1][1].body).not.toMatch(/日本語本文expired/);
+    expect(fetcher.mock.calls[1][1].body).not.toMatch(/日本語本文expired|期限切れ名前fixture/);
     expect(fetcher).toHaveBeenCalledTimes(2); moderation.reset();
   } finally { vi.useRealTimers(); }
 });

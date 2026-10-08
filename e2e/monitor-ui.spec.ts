@@ -28,7 +28,8 @@ async function withMonitor(run: (page: Page) => Promise<void>) {
       let hidden: string[] = [];
       const special = ['zero', 'rounded', 'bad', 'disabled', 'burst', 'missing', 'failed'];
       const authorId = (id: string) => `UC${id.padEnd(22, '_')}`;
-      const message = (id: string) => ({ id, authorChannelId: authorId(id),
+      const names: Record<string, string> = { zero: 'あおい', rounded: 'はるか', bad: 'みどり', disabled: 'さくら', burst: 'りん', missing: 'なお', failed: 'ゆう' };
+      const message = (id: string) => ({ id, authorChannelId: authorId(id), authorDisplayName: names[id] ?? 'チャット参加者',
         text: id === 'rounded' ? '<img src=x onerror=alert(1)>' + '長い本文'.repeat(100) : `本文fixture ${id}`,
         type: 'textMessageEvent' });
       let queued = [...special, ...Array.from({ length: 45 }, (_, i) => `initial-${i}`)].map(message);
@@ -48,7 +49,8 @@ async function withMonitor(run: (page: Page) => Promise<void>) {
           const messages = queued; queued = [];
           return { ok: true, value: { messages, nextPageToken: 'next', pollingIntervalMillis: 5000, ended: false } };
         }
-        if (value.type === 'hidden.list') return { ok: true, videoId: 'abcdefghijk', ids: hidden };
+        if (value.type === 'hidden.list') return { ok: true, videoId: 'abcdefghijk', ids: hidden,
+          authors: hidden.map(authorChannelId => ({ authorChannelId, displayName: authorChannelId === authorId('bad') ? 'みどり' : 'りん' })) };
         if (value.type === 'hidden.remove') { hidden = hidden.filter(id => id !== value.authorChannelId); return { ok: true }; }
         if (value.type === 'jev.evaluate') {
           requests++; await held;
@@ -118,6 +120,8 @@ test('monitor UI fixture: 密なコメント・最大スコア/raw・配信別�
     const row = (id: string) => page.locator('#messages > li').filter({ has: page.locator('.chat-author', { hasText: authorId(id) }) });
     await expect(row('zero').locator('.score-badge')).toHaveText('判定スコア 0.00');
     await expect(row('rounded').locator('.score-badge')).toHaveText('判定スコア 0.80');
+    await expect(row('rounded').locator('.chat-author .author-name')).toHaveText('はるか');
+    await expect(row('rounded').locator('.author-details span')).toHaveText(authorId('rounded'));
     await expect(row('rounded').locator('.moderation-status')).toContainText('該当なし');
     await expect(row('rounded').locator('.moderation-status')).not.toContainText('悪質');
     await expect(row('bad').locator('.moderation-status')).toContainText('悪質');
@@ -145,7 +149,7 @@ test('monitor UI fixture: 密なコメント・最大スコア/raw・配信別�
     await page.clock.runFor(1_100);
     await expect(page.locator('#hidden-authors li')).toHaveCount(2);
     await expect(page.locator('#hidden-authors')).not.toContainText(authorId('failed'));
-    await page.getByRole('button', { name: `${authorId('bad')} の非表示を解除`, exact: true }).click();
+    await page.getByRole('button', { name: `みどり（投稿者ID：${authorId('bad')}）の非表示を解除`, exact: true }).click();
     await expect(page.locator('#hidden-authors li')).toHaveCount(1);
     const layout = await page.evaluate(() => {
       const chat = document.querySelector<HTMLElement>('.chat-scroll')!;

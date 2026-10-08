@@ -30,6 +30,8 @@ export function createHiddenAuthorHandler({ store, tabs, session, runtime }: {
           || videoIdFromUrl((await tabs.get(binding.targetTabId)).url) !== m.videoId) return denied;
         if (m.type === 'hidden.remove' && Object.keys(m).length === 3 && validAuthor(m.authorChannelId)) await store.remove(m.videoId, m.authorChannelId);
         else if (m.type !== 'hidden.list' || Object.keys(m).length !== 2) return denied;
+        const authors = await store.listAuthors(m.videoId);
+        return { ok: true, videoId: m.videoId, ids: authors.map(author => author.authorChannelId), authors };
       } else {
         if (m.type !== 'hidden.list' || Object.keys(m).length !== 3 || typeof m.referrer !== 'string'
           || chatVideo(sender.url, m.referrer) !== m.videoId) return denied;

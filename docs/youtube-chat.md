@@ -40,7 +40,7 @@ Chrome公式はworkerが30秒の無活動、fetch応答待ち30秒等で終了�
 
 `src/youtube/contracts.ts`:
 - `Result<T>`は`{ ok: true, value: T }`または`{ ok: false, error: ChatError }`。
-- `ChatMessage`: YouTubeのmessage `id`、`text`（snippet.displayMessage）、`authorChannelId`（authorDetails.channelId）、`type`。アプリ永続化IDではない。
+- `ChatMessage`: YouTubeのmessage `id`、`text`（snippet.displayMessage）、`authorChannelId`（authorDetails.channelId）、任意の`authorDisplayName`（authorDetails.displayName）、`type`。アプリ永続化IDではない。名前は表示用であり、IDによる照合やJev判定の入力には使わない。未取得名は「名前不明」と表示する。
 - `ChatPage`: `messages`, `nextPageToken`, `pollingIntervalMillis`, `ended`。
 - `ChatError`: 列挙code、固定日本語message、任意retryAfterMillisのみ。provider error.message/body/生URL/キー/例外causeは返さない。
 

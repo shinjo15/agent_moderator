@@ -40,6 +40,24 @@ it('HTTP-dateのRetry-Afterを尊重し、不正な値は既定待機へ任せ�
 
 const message = { id: 'msg-1', snippet: { type: 'textMessageEvent', hasDisplayContent: true, displayMessage: 'こんにちは' }, authorDetails: { channelId: 'channel-1' } };
 const chatPage = { nextPageToken: 'next-1', pollingIntervalMillis: 8000, items: [message] };
+it('既取得authorDetails.displayNameをIDとは別に伝播し追加requestやfields変更をしない', async () => {
+  const name = 'みどり <img src=x onerror=alert(1)>';
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...chatPage,
+    items: [{ ...message, authorDetails: { ...message.authorDetails, displayName: name } }] })));
+  const result = await createYouTubeClient(fetcher).listMessages('chat', undefined, 'synthetic', new AbortController().signal);
+  expect(result).toMatchObject({ ok: true, value: { messages: [{ authorChannelId: 'channel-1', authorDisplayName: name }] } });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  const url = new URL(fetcher.mock.calls[0][0]);
+  expect(url.searchParams.get('part')).toBe('id,snippet,authorDetails');
+  expect(url.searchParams.has('fields')).toBe(false);
+});
+it.each([undefined, null, 123, '', '   '])('取得できない名前 %j を推測せず既存IDを保持する', async displayName => {
+  const client = createYouTubeClient(vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...chatPage,
+    items: [{ ...message, authorDetails: { ...message.authorDetails, displayName } }] }))));
+  const result = await client.listMessages('chat', undefined, 'synthetic', new AbortController().signal);
+  expect(result).toMatchObject({ ok: true, value: { messages: [{ authorChannelId: 'channel-1' }] } });
+  if (result.ok) expect(result.value.messages[0]).not.toHaveProperty('authorDisplayName');
+});
 it('既存listのpublishedAtを任意に取り込み欠落/不正を捏造しない', async () => {
   for (const publishedAt of ['2026-01-01T00:00:00Z', undefined, 'invalid']) {
     const client = createYouTubeClient(vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...chatPage, items: [{ ...message, snippet: { ...message.snippet, publishedAt } }] }))));

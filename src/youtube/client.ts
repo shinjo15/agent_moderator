@@ -1,4 +1,4 @@
-import { failure, type ChatMessage, type ChatPage, type Result, type YouTubeClient } from './contracts';
+import { failure, validDisplayName, type ChatMessage, type ChatPage, type Result, type YouTubeClient } from './contracts';
 import { publicationTime } from './published-at';
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -39,6 +39,7 @@ function parsePage(body: unknown): Result<ChatPage> {
     if (snippet.hasDisplayContent === false) continue;
     if (typeof snippet.displayMessage !== 'string' || !record(item.authorDetails) || !nonempty(item.authorDetails.channelId)) return failure('invalidResponse');
     messages.push({ id: item.id, text: snippet.displayMessage, type: snippet.type as string, authorChannelId: item.authorDetails.channelId,
+      ...(validDisplayName(item.authorDetails.displayName) ? { authorDisplayName: item.authorDetails.displayName } : {}),
       ...(publicationTime(snippet.publishedAt) === undefined ? {} : { publishedAt: snippet.publishedAt as string }) });
   }
   return { ok: true, value: { messages, nextPageToken: body.nextPageToken, pollingIntervalMillis: body.pollingIntervalMillis, ended } };

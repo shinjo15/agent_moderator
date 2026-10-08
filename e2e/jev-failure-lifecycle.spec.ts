@@ -39,7 +39,7 @@ async function withPanel(run: (page: Page) => Promise<void>, realCore = false) {
     const main = document.createElement('main'); document.body.append(main);
     const panel = createJevPanel(main, transport); panel.setTarget(true);
     Object.assign(globalThis, { failureFixture: {
-      observe(id: string) { core?.observe([chatPost(id, Date.now(), 'fixture-author')]); },
+      observe(id: string) { core?.observe([{ ...chatPost(id, Date.now(), 'fixture-author'), authorDisplayName: '期限切れ名前fixture' }]); },
       evaluate(id: string) { return transport.evaluate(id, 'fixture-author'); },
       add(id: string) { core?.observe([chatPost(id, Date.now(), 'fixture-author')]); row = document.createElement('li'); main.append(row); panel.add(id, 'fixture-author', row); },
       remove() { panel.remove(row); }, release() { release(); }, requests() { return requests; },
@@ -115,6 +115,7 @@ test('current観測TTL expiryの429を実client/core/runtime/panel経路で停�
     await expect(enable).toBeEnabled(); await expect(disable).toBeDisabled();
     await expect(page.locator('.moderation-status')).toContainText('未判定 / Jev判定失敗');
     await expect(page.locator('.score-badge')).toHaveCount(0);
+    await expect(page.locator('body')).not.toContainText('期限切れ名前fixture');
     expect(await page.evaluate(() => failureFixture.evaluate('expired-current'))).toBeUndefined();
     expect(await page.evaluate(() => failureFixture.requests())).toBe(1);
     await enable.click();

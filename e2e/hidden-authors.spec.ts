@@ -6,7 +6,7 @@ import { apiResponse } from '../tests/fixtures/jev';
 declare const chrome: { tabs: { create(o: {url:string;active:boolean}):Promise<unknown> }; runtime:{sendMessage(m:unknown):Promise<unknown>}; storage:{local:{get(keys:string[]):Promise<Record<string,unknown>>;set(v:Record<string,unknown>):Promise<void>}} };
 const author = 'UCabcdefghijklmnopqrstuv'; const other = 'UCzyxwvutsrqponmlkjihgfe'; const video = 'abcdefghijk';
 const chat = `<!doctype html><body><script>
-function append(id,author){const e=document.createElement('yt-live-chat-text-message-renderer');e.id=id;e.textContent='同じ表示名: fixture';e.data={authorExternalChannelId:author};document.body.append(e);return e;}
+function append(id,author){const e=document.createElement('yt-live-chat-text-message-renderer');e.id=id;e.textContent='みどり: こんにちは';e.data={authorExternalChannelId:author};document.body.append(e);return e;}
 append('existing','${author}');append('other','${other}');append('unknown',undefined);
 </script></body>`;
 
@@ -22,12 +22,12 @@ test('MV3: official→Jev→既存/新着非表示、同名別author・iframe/po
  await context.route('https://www.googleapis.com/youtube/v3/**',route=>{
  const url=new URL(route.request().url());
  if (fail && !url.pathname.endsWith('/videos')) return route.fulfill({status:503,body:'fixture-unavailable'});
- if (burst && !url.pathname.endsWith('/videos')) return route.fulfill({json:{nextPageToken:`burst-${++pages}`,pollingIntervalMillis:5000,items:Array.from({length:10},(_,n)=>({id:`burst-${pages}-${n}`,snippet:{type:'textMessageEvent',hasDisplayContent:true,displayMessage:'公式取得fixtureの連投',publishedAt:new Date(Date.UTC(2026,0,1,0,1,n)).toISOString()},authorDetails:{channelId:author}}))}});
- return route.fulfill({json:url.pathname.endsWith('/videos')?{items:[{id:video,liveStreamingDetails:{activeLiveChatId:'fixture-chat'}}]}:{nextPageToken:`next-${++pages}`,pollingIntervalMillis:5000,items:[{id:`post-${pages}`,snippet:{type:'textMessageEvent',hasDisplayContent:true,displayMessage:'APIからだけの本文',publishedAt:new Date(2026,0,1,0,0,pages*5).toISOString()},authorDetails:{channelId:author}}]}});
+ if (burst && !url.pathname.endsWith('/videos')) return route.fulfill({json:{nextPageToken:`burst-${++pages}`,pollingIntervalMillis:5000,items:Array.from({length:10},(_,n)=>({id:`burst-${pages}-${n}`,snippet:{type:'textMessageEvent',hasDisplayContent:true,displayMessage:'公式取得fixtureの連投',publishedAt:new Date(Date.UTC(2026,0,1,0,1,n)).toISOString()},authorDetails:{channelId:author,displayName:'みどり'}}))}});
+ return route.fulfill({json:url.pathname.endsWith('/videos')?{items:[{id:video,liveStreamingDetails:{activeLiveChatId:'fixture-chat'}}]}:{nextPageToken:`next-${++pages}`,pollingIntervalMillis:5000,items:[{id:`post-${pages}`,snippet:{type:'textMessageEvent',hasDisplayContent:true,displayMessage:'APIからだけの本文',publishedAt:new Date(2026,0,1,0,0,pages*5).toISOString()},authorDetails:{channelId:author,displayName:'みどり'}}]}});
  });
  let releaseJev: (() => void) | undefined;
  await context.route('https://api.typesafe.ai/v1/systemone',async route=>{
- expect(JSON.stringify(route.request().postDataJSON().state)).not.toContain('同じ表示名');
+ expect(JSON.stringify(route.request().postDataJSON().state)).not.toContain('みどり');
  if (!releaseJev) await new Promise<void>(done => { releaseJev = done; });
  await route.fulfill({json:apiResponse({attack:0.8})});
  });
@@ -63,7 +63,7 @@ test('MV3: official→Jev→既存/新着非表示、同名別author・iframe/po
  },author);
  expect(switchedDisplay).not.toBe('none');
  await popout.goto(`https://www.youtube.com/live_chat?v=${video}&is_popout=1`);
- await monitor.getByRole('button',{name:`${author} の非表示を解除`,exact:true}).click();
+ await monitor.getByRole('button',{name:`みどり（投稿者ID：${author}）の非表示を解除`,exact:true}).click();
  await expect(frame.locator('#existing')).toBeVisible();await expect(popout.locator('#existing')).toBeVisible();
  await expect(monitor.locator('#hidden-authors li')).toHaveCount(0);
  await expect(monitor.getByTestId('jev-status')).toContainText('停止');

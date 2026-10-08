@@ -1,5 +1,5 @@
 import { runtime } from '../extension-runtime';
-import { failure, type ChatPage, type Result } from './contracts';
+import { failure, validDisplayName, type ChatPage, type Result } from './contracts';
 import type { ChatTransport } from './monitor';
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -9,7 +9,8 @@ function validPage(value: unknown): value is ChatPage {
   return object(value) && Array.isArray(value.messages) && value.messages.every(message => object(message)
     && typeof message.id === 'string' && message.id.length > 0 && typeof message.text === 'string'
     && typeof message.authorChannelId === 'string' && message.authorChannelId.length > 0
-    && typeof message.type === 'string' && message.type.length > 0)
+    && typeof message.type === 'string' && message.type.length > 0
+    && (message.authorDisplayName === undefined || validDisplayName(message.authorDisplayName)))
     && typeof value.nextPageToken === 'string' && value.nextPageToken.length > 0
     && typeof value.pollingIntervalMillis === 'number' && Number.isSafeInteger(value.pollingIntervalMillis)
     && value.pollingIntervalMillis > 0 && typeof value.ended === 'boolean';
