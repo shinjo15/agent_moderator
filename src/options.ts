@@ -2,6 +2,7 @@ import { runtime } from './extension-runtime';
 import type { ApiKeyProvider, CredentialStatus } from './credential-store';
 import { createFilterSettingsPanel } from './jev/options';
 import { createNotice } from './ui-notice';
+import { createHiddenDataPanel } from './hidden-authors/options';
 import { createConfirmationPanel } from './confirmation-panel';
 
 const heading = document.createElement('h1');
@@ -110,5 +111,6 @@ for (const [provider, name] of [['jev', 'Jev'], ['youtube', 'YouTube']] as const
   main.append(section);
 }
 createFilterSettingsPanel(main, runtime);
+createHiddenDataPanel(main, runtime);
 main.append(notice);
 void request({ type: 'storage.init' });

@@ -107,6 +107,12 @@ window.addEventListener('pagehide', () => { jev.stop(undefined, true); monitor.s
 runtime.onMessage.addListener((message, sender) => {
   if (sender.id !== runtime.id || (sender.url !== undefined && sender.url !== runtime.getURL('background.js'))
     || typeof message !== 'object' || message === null || !('type' in message)) return false;
+  if (message.type === 'hidden.clearing' || message.type === 'hidden.refresh') {
+    jev.stop('非表示データの削除のためJev判定を停止しました。再開は明示的に操作してください。', true);
+    monitor.credentialsChanged(available);
+    hidden.refresh();
+    status.textContent = '非表示データの削除のため取得・判定を停止しました。再開するには「取得を開始」を押してください。';
+  }
   if (message.type === 'confirmation.changed') {
     monitor.stop(); jev.stop(confirmationRequired, true);
     status.textContent = '利用条件の確認状態が変更されたため停止しました。設定を確認し、明示的に再開してください。';

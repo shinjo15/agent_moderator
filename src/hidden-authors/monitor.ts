@@ -61,5 +61,6 @@ export function createHiddenAuthorPanel(main: HTMLElement, transport: Pick<typeo
     } catch { if (current === generation) status.textContent = '非表示一覧を確認できません。対象配信を選び直してください。'; }
   }
   setInterval(() => { void refresh(); }, 1000);
-  return { setVideo(value: string | undefined) { generation++; video = value; signature = ''; list.replaceChildren(); empty.hidden = true; status.textContent = value ? 'リストを確認中です。' : '対象配信を選択してください。'; void refresh(); } };
+  return { refresh() { generation++; signature = ''; void refresh(); },
+    setVideo(value: string | undefined) { generation++; video = value; signature = ''; list.replaceChildren(); empty.hidden = true; status.textContent = value ? 'リストを確認中です。' : '対象配信を選択してください。'; void refresh(); } };
 }

@@ -178,7 +178,7 @@ test('ブラウザとservice workerを再起動してもキーを保持しUIに�
   } finally { await launched.context.close(); await rm(profile, { recursive: true, force: true }); }
 });
 
-test('別拡張機能の実external senderからキー操作とフィルター設定を拒否する', async () => {
+test('別拡張機能の実external senderからキー操作・フィルター設定・全非表示削除を拒否する', async () => {
   const profile = await mkdtemp(join(tmpdir(), 'agent-moderator-external-profile-'));
   const companion = await mkdtemp(join(tmpdir(), 'agent-moderator-external-extension-'));
   await Promise.all([
@@ -212,6 +212,8 @@ test('別拡張機能の実external senderからキー操作とフィルター�
       expect(await externalPage.evaluate(({ target, message }) => chrome.runtime.sendMessage(target, message), { target: id, message }))
         .toEqual({ ok: false, error: 'この要求は許可されていません。', code: 'authorization' });
     }
+    expect(await externalPage.evaluate(target => chrome.runtime.sendMessage(target, { type: 'hidden.clearAll' }), id))
+      .toEqual({ ok: false, error: 'この要求は許可されていません。' });
     expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'settings.getFilter' }))).toEqual({ ok: true, value: { threshold: 0.9 } });
     expect(await worker.evaluate(async () => (await chrome.storage.local.get(['apiKey.youtube']))['apiKey.youtube'] === 'synthetic-external-protected')).toBe(true);
   } finally {
