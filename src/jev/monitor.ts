@@ -3,7 +3,9 @@ import { categories, definitions, type Category } from './policy';
 import type { JevError } from './contracts';
 import { createTransientMap, MAX_PENDING_EVALUATIONS, TRANSIENT_TTL_MILLIS } from '../retention';
 import { createNotice } from '../ui-notice';
+import { confirmationRequired } from '../confirmation';
 const failures: Record<JevError['code'], string> = {
+  confirmationRequired,
   missingKey: '設定でJev APIキーを保存してください。', auth: 'Jev APIキーの認証に失敗しました。設定でキーを確認し、保存し直してください。', validation: 'Jevに判定を依頼できませんでした。時間をおいて再開し、問題が続く場合は拡張機能の更新を確認してください。',
   rateLimited: 'Jevの利用制限です。時間をおいて再開ボタンを押してください。', overloaded: 'Jevが混雑しています。時間をおいて再開ボタンを押してください。',
   network: 'Jevとの通信に失敗しました。接続を確認し、再開ボタンを押してください。', invalidResponse: 'Jevの判定結果を確認できませんでした。時間をおいて再開ボタンを押してください。', aborted: 'Jev判定を停止しました。再開ボタンを押してください。', api: 'Jev判定に失敗しました。時間をおいて再開ボタンを押してください。',
@@ -12,7 +14,8 @@ export function createJevPanel(main: HTMLElement, transport: ReturnType<typeof c
   const section = document.createElement('section');
   section.className = 'jev-controls';
   const notice = createNotice('monitor-note', [
-    'Jev判定を有効にすると、コメントをJevへ送信します。利用料金は利用者負担です。',
+    'Jev判定を有効にすると、悪質性の判定のためコメントの本文と投稿時刻をTypeSafe AIへ送信します。同じ投稿者の60秒以内・対象を含め最大20件です。利用料金は利用者負担です。',
+    '設定で利用条件を確認する前は送信しません。利用者の確認は投稿者本人の同意ではありません。',
   ], [
     '有効にした後に取得するコメントだけを判定します。同じ投稿者の直近60秒以内・対象を含め最大20件の本文と投稿時刻のみを送信します。投稿者ID・他の投稿者のコメント・APIキーは投稿データに含めません。',
     '1件につき7項目を1回の通信で判定します。失敗しても自動では再送しません。',

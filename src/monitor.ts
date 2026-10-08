@@ -7,6 +7,7 @@ import { createHiddenAuthorPanel } from './hidden-authors/monitor';
 import { MAX_VISIBLE_MESSAGES } from './retention';
 import { createNotice } from './ui-notice';
 import { createAuthorLabel } from './author-label';
+import { confirmationRequired } from './confirmation';
 
 const main = document.querySelector('main')!;
 const heading = document.createElement('h1');
@@ -111,6 +112,10 @@ runtime.onMessage.addListener((message, sender) => {
     monitor.credentialsChanged(available);
     hidden.refresh();
     status.textContent = '非表示データの削除のため取得・判定を停止しました。再開するには「取得を開始」を押してください。';
+  }
+  if (message.type === 'confirmation.changed') {
+    monitor.stop(); jev.stop(confirmationRequired, true);
+    status.textContent = '利用条件の確認状態が変更されたため停止しました。設定を確認し、明示的に再開してください。';
   }
   if (message.type === 'youtube.credentialsChanged' && 'available' in message && typeof message.available === 'boolean') {
     jev.stop('YouTubeキー変更のためJev判定も停止しました。', true);

@@ -16,7 +16,7 @@ async function withPanel(run: (page: Page) => Promise<void>, realCore = false) {
     let release = () => {};
     let requests = 0;
     let row: HTMLElement;
-    const core = ${realCore} ? createModeration({ readKey: async () => 'synthetic', client: createJevClient(async () => {
+    const core = ${realCore} ? createModeration({ readConfirmation: async () => true, readKey: async () => 'synthetic', client: createJevClient(async () => {
       requests++;
       if (requests === 1) {
         await new Promise<void>(resolve => { release = resolve; });

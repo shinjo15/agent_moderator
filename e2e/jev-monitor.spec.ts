@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { apiResponse, keys } from '../tests/fixtures/jev';
+import { confirmUsage } from './fixtures/confirm-usage';
 declare const chrome: { tabs: { create(options: { url: string; active: boolean }): Promise<unknown> }; runtime: { sendMessage(message: unknown): Promise<unknown> } };
 
 test('production MV3: 既取得fixture→background→Jev全項目fixture→表示、opt-in/失敗/secret/sender', async () => {
@@ -50,6 +51,7 @@ test('production MV3: 既取得fixture→background→Jev全項目fixture→表�
     });
     const options = await context.newPage();
     await options.goto(`chrome-extension://${id}/options.html`);
+    await confirmUsage(options);
     for (const provider of ['YouTube', 'Jev']) {
       await options.getByLabel(`${provider} APIキー`).fill(provider === 'Jev' ? 'synthetic-jev' : 'synthetic-youtube');
       await options.getByRole('button', { name: `${provider}キーを保存`, exact: true }).click();

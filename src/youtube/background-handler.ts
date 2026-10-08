@@ -29,12 +29,13 @@ function tabId(sender: MessageSender): number | undefined {
 }
 function text(value: unknown): value is string { return typeof value === 'string' && value.length > 0 && value.length <= 10000; }
 
-export function createYouTubeHandler({ session, tabs, runtime, client, initialize, readApiKey, moderation, hiddenAuthors, now = Date.now }: {
+export function createYouTubeHandler({ session, tabs, runtime, client, initialize, readApiKey, moderation, hiddenAuthors, readConfirmation = async () => false, now = Date.now }: {
   session: SessionStorage; tabs: ExtensionTabs;
   runtime: { id: string; getURL(path: string): string; sendMessage(message: unknown): Promise<unknown> };
   client: YouTubeClient; initialize: () => Promise<void>; readApiKey: () => Promise<string | undefined>; now?: () => number;
   moderation?: ReturnType<typeof createModeration>;
   hiddenAuthors?: ReturnType<typeof createHiddenAuthors>;
+  readConfirmation?: () => Promise<boolean>;
 }) {
   let gate: Promise<void> | undefined;
   const exclusive = createBoundedQueue({ now });
@@ -99,6 +100,12 @@ export function createYouTubeHandler({ session, tabs, runtime, client, initializ
     await ready();
     await notify({ type: 'youtube.credentialsChanged', available: Boolean(await readApiKey()) });
   }
+  function confirmationChanged() {
+    collectionGeneration++;
+    moderation?.stopCollection();
+    inflight?.controller.abort();
+    return notify({ type: 'confirmation.changed' });
+  }
   async function targetChanged(id: number, url?: string) {
     const changed = (selected: Binding | undefined) => selected !== undefined
       && (selected.monitorTabId === id || selected.targetTabId === id)
@@ -128,9 +135,14 @@ export function createYouTubeHandler({ session, tabs, runtime, client, initializ
     const requestEpoch = deletionEpoch;
     const admitted = !deleting;
     const currentEpoch = () => admitted && requestEpoch === deletionEpoch && !deleting;
+    // Admission epoch must precede every await, including worker initialization.
+    const selectedCollection = collectionGeneration;
+    const collects = message.type === 'youtube.resolve' || message.type === 'youtube.list'
+      || message.type === 'jev.enable' || message.type === 'jev.evaluate';
+    const staleCollection = () => collects && selectedCollection !== collectionGeneration;
     try {
       await ready();
-      if (!currentEpoch()) return failure('aborted');
+      if (!currentEpoch() || staleCollection()) return failure('aborted');
       if (message.type === 'youtube.openMonitor') return await stateExclusive(async () => {
         if (!currentEpoch()) return failure('aborted');
         if (!Number.isSafeInteger(message.tabId) || typeof message.videoId !== 'string'
@@ -157,11 +169,10 @@ export function createYouTubeHandler({ session, tabs, runtime, client, initializ
         return { ok: true, value: { monitorTabId } };
       });
       const selectedGeneration = bindingGeneration;
-      const selectedCollection = collectionGeneration;
       const selected = await binding();
       if (!currentEpoch()) return failure('aborted');
       if (!selected || tabId(sender) !== selected.monitorTabId) return failure('forbidden');
-      if (selectedGeneration !== bindingGeneration) return failure('aborted');
+      if (selectedGeneration !== bindingGeneration || staleCollection()) return failure('aborted');
       activeBinding = { generation: selectedGeneration, binding: selected };
       if (message.type === 'youtube.cancel') {
         if (!text(message.requestId)) return failure('invalidInput');
@@ -171,15 +182,14 @@ export function createYouTubeHandler({ session, tabs, runtime, client, initializ
         return { ok: true, value: {} };
       }
       if (videoIdFromUrl((await tabs.get(selected.targetTabId)).url) !== selected.videoId) return failure('invalidInput');
-      if (!currentEpoch()) return failure('aborted');
-      if (selectedGeneration !== bindingGeneration) return failure('aborted');
+      if (!currentEpoch() || selectedGeneration !== bindingGeneration || staleCollection()) return failure('aborted');
       if (message.type.startsWith('jev.')) {
         if (!moderation) return failure('forbidden');
         const count = Object.keys(message).length;
         if (message.type === 'jev.disable' && count === 1) { moderation.stop(); return { ok: true }; }
         if (message.type === 'jev.stopCollection' && count === 1) { collectionGeneration++; moderation.stopCollection(); return { ok: true }; }
         let result: unknown;
-        const collection = collectionGeneration;
+        const collection = selectedCollection;
         if (message.type === 'jev.enable' && count === 1) result = await moderation.enable();
         else if (message.type === 'jev.evaluate' && count === 2 && text(message.id)) {
           const observed = observations.get(message.id);
@@ -197,7 +207,7 @@ export function createYouTubeHandler({ session, tabs, runtime, client, initializ
           }
         }
         else return failure('invalidInput');
-        if (!currentEpoch() || selectedGeneration !== bindingGeneration) return failure('aborted');
+        if (!currentEpoch() || selectedGeneration !== bindingGeneration || staleCollection()) return failure('aborted');
         return result;
       }
       if (message.type === 'youtube.status') return { ok: true, value: {
@@ -212,14 +222,17 @@ export function createYouTubeHandler({ session, tabs, runtime, client, initializ
           || (message.pageToken !== undefined && !text(message.pageToken))) return failure('invalidInput');
       } else return failure('forbidden');
       return await exclusive(async () => {
-        if (!currentEpoch()) return failure('aborted');
+        if (!currentEpoch() || staleCollection()) return failure('aborted');
         if (cancelled.has(message.requestId as string)) { cancelled.delete(message.requestId as string); return failure('aborted'); }
         const current = await binding();
         if (selectedGeneration !== bindingGeneration || !current || current.monitorTabId !== selected.monitorTabId || current.videoId !== selected.videoId
           || videoIdFromUrl((await tabs.get(current.targetTabId)).url) !== current.videoId) return failure('invalidInput');
         const generation = credentialGeneration;
+        const confirmed = await readConfirmation();
+        if (!currentEpoch() || staleCollection()) return failure('aborted');
+        if (!confirmed) { moderation?.stopCollection(); return failure('confirmationRequired'); }
         const key = await readApiKey();
-        if (!currentEpoch()) return failure('aborted');
+        if (!currentEpoch() || staleCollection()) return failure('aborted');
         if (!key) return failure('auth');
         const stored = (await session.get([COOLDOWN]))[COOLDOWN];
         if (!currentEpoch()) return failure('aborted');
@@ -230,6 +243,9 @@ export function createYouTubeHandler({ session, tabs, runtime, client, initializ
         // Crash/worker shutdown retains a conservative lease, not just the ordinary interval.
         await session.set({ [COOLDOWN]: { interval, notBefore: now() + Math.max(interval, 25000) } });
         if (!currentEpoch()) return failure('aborted');
+        const sendConfirmed = await readConfirmation();
+        if (!currentEpoch() || staleCollection()) return failure('aborted');
+        if (!sendConfirmed) { moderation?.stopCollection(); return failure('confirmationRequired'); }
         const controller = new AbortController();
         inflight = { requestId: message.requestId as string, controller, binding: current };
         if (cancelled.has(inflight.requestId) || generation !== credentialGeneration || selectedGeneration !== bindingGeneration) controller.abort();
@@ -291,5 +307,5 @@ export function createYouTubeHandler({ session, tabs, runtime, client, initializ
       });
     } catch { return failure('network'); }
   }
-  return { handle, credentialsChanged, targetChanged, clearHiddenData };
+  return { handle, credentialsChanged, targetChanged, clearHiddenData, confirmationChanged };
 }

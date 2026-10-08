@@ -2,6 +2,7 @@ import { test, expect, chromium } from '@playwright/test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { confirmUsage } from './fixtures/confirm-usage';
 
 declare const chrome: {
   tabs: { create(options: { url: string; active: boolean }): Promise<unknown> };
@@ -20,6 +21,7 @@ test('production MV3: activeTabから選択しYouTubeタブ前面でもfixture�
     const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
     const id = new URL(worker.url()).hostname;
     const tokens: (string | null)[] = [];
+    let videoCalls = 0;
     const callTimes: number[] = [];
     let mode: 'success' | 'quota' | 'invalid' = 'success';
     await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>YouTube視聴タブfixture</title><h1>配信fixture（実配信ではない）</h1>' }));
@@ -27,6 +29,7 @@ test('production MV3: activeTabから選択しYouTubeタブ前面でもfixture�
       const url = new URL(route.request().url());
       expect(['fixture-not-real-key', 'fixture-replacement']).toContain(url.searchParams.get('key'));
       if (url.pathname.endsWith('/videos')) {
+        videoCalls++;
         await route.fulfill({ json: { items: [{ id: 'abcdefghijk', liveStreamingDetails: { activeLiveChatId: 'fixture-chat' } }] } });
       } else {
         tokens.push(url.searchParams.get('pageToken')); callTimes.push(Date.now());
@@ -43,6 +46,7 @@ test('production MV3: activeTabから選択しYouTubeタブ前面でもfixture�
     });
     const options = await context.newPage();
     await options.goto(`chrome-extension://${id}/options.html`);
+
     await expect(options.getByText(/「取得を開始」でYouTubeへ通信します/)).toBeVisible();
     expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'youtube.resolve', videoId: 'abcdefghijk', requestId: 'forbidden' })))
       .toMatchObject({ ok: false, error: { code: 'forbidden' } });
@@ -68,6 +72,12 @@ test('production MV3: activeTabから選択しYouTubeタブ前面でもfixture�
     const monitor = await monitorPromise;
     await expect(monitor).toHaveURL(`chrome-extension://${id}/monitor.html`);
     await expect(monitor.getByRole('button', { name: '取得を開始' })).toBeEnabled();
+    expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'jev.enable' })))
+      .toMatchObject({ ok: false, error: { code: 'confirmationRequired' } });
+    await monitor.getByRole('button', { name: '取得を開始' }).click();
+    await expect(monitor.getByRole('status')).toContainText('設定で利用条件');
+    expect(videoCalls).toBe(0); expect(tokens).toHaveLength(0);
+    await confirmUsage(options);
     await monitor.getByRole('button', { name: '取得を開始' }).click();
     await expect(monitor.locator('#messages li')).toHaveCount(2, { timeout: 12000 });
     await youtube.bringToFront();

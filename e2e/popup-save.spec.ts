@@ -206,6 +206,10 @@ test('actual action popup→同じpopup内optionsの保存は拒否されずread
     console.log('SAFE_POPUP_FLAGS', JSON.stringify({ browser: context.browser()!.version(), diagnostics, metadataMatches, popupContextMatches }));
     expect(diagnostics).toEqual({ isPopup: true, documentUrlMatches: true, uiSaved: true, getValid: true, saveValid: true, credentialsValid: true, secretDenied: true });
     expect(metadataMatches).toBe(true); expect(popupContextMatches).toBe(true);
+    expect(await evaluate("chrome.runtime.sendMessage({type:'confirmation.get'})")).toEqual({ ok: true, value: { confirmed: false, version: 1 } });
+    await evaluate("document.querySelector('input[type=checkbox]').click(); Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='利用条件の確認を保存').click()");
+    await expect.poll(() => evaluate("document.querySelector('[data-testid=confirmation-status]').textContent")).toContain('確認済み');
+    expect(await evaluate("chrome.runtime.sendMessage({type:'confirmation.get'})")).toEqual({ ok: true, value: { confirmed: true, version: 1 } });
     for (const [choice, threshold] of [['high', 0.65], ['medium', 0.8], ['low', 0.9], ['custom', 0], ['custom', 1], ['custom', 0.731]] as const) {
       await evaluate(`document.querySelector('select').value=${JSON.stringify(choice)}; document.querySelector('select').dispatchEvent(new Event('change'));
         ${choice === 'custom' ? `document.querySelector('#filter-threshold').value=${JSON.stringify(String(threshold))}; document.querySelector('#filter-threshold').dispatchEvent(new Event('input'));` : ''}
@@ -226,6 +230,7 @@ test('actual action popup→同じpopup内optionsの保存は拒否されずread
     expect(await evaluate("chrome.runtime.sendMessage({type:'settings.getFilter'})")).toEqual({ ok: true, value: { threshold: 0.731 } });
     await context.close(); context = await launch(profile);
     const restarted = await popup(context);
+    await expect.poll(() => restarted.evaluate("document.querySelector('[data-testid=confirmation-status]').textContent")).toContain('確認済み');
     await expect.poll(() => restarted.evaluate("document.querySelector('[data-testid=filter-status]').textContent")).toBe('現在の設定：カスタム / 判定の基準値 0.731');
     expect(await restarted.evaluate("chrome.runtime.sendMessage({type:'settings.getFilter'})")).toEqual({ ok: true, value: { threshold: 0.731 } });
     expect(await restarted.evaluate("chrome.runtime.sendMessage({type:'storage.init'})")).toEqual({ ok: true, status: { jev: true, youtube: false } });
