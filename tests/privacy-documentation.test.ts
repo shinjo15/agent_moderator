@@ -68,7 +68,11 @@ it('停止・個別解除・キー削除・拡張削除と提供元の処理を�
   for (const action of ['Jev判定を停止', '取得を停止', '非表示を解除', 'YouTubeキーを削除', 'Jevキーを削除', 'chrome://extensions', 'アンインストール']) {
     expect(text).toContain(action);
   }
-  expect(text).toContain('一括消去ボタンはありません');
+  expect(text).toContain('全配信の非表示データを削除');
+  expect(text).toContain('APIの待機期限');
+  expect(text).toContain('空の保存項目');
+  expect(text).toContain('削除を確認できない');
+  expect(text).not.toContain('一括消去ボタンはありません');
   expect(text).toContain('遠隔削除');
   expect(text).toContain('送信済み');
   expect(text).toContain('失効');

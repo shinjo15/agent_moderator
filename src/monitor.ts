@@ -106,6 +106,12 @@ window.addEventListener('pagehide', () => { jev.stop(undefined, true); monitor.s
 runtime.onMessage.addListener((message, sender) => {
   if (sender.id !== runtime.id || (sender.url !== undefined && sender.url !== runtime.getURL('background.js'))
     || typeof message !== 'object' || message === null || !('type' in message)) return false;
+  if (message.type === 'hidden.clearing' || message.type === 'hidden.refresh') {
+    jev.stop('非表示データの削除のためJev判定を停止しました。再開は明示的に操作してください。', true);
+    monitor.credentialsChanged(available);
+    hidden.refresh();
+    status.textContent = '非表示データの削除のため取得・判定を停止しました。再開するには「取得を開始」を押してください。';
+  }
   if (message.type === 'youtube.credentialsChanged' && 'available' in message && typeof message.available === 'boolean') {
     jev.stop('YouTubeキー変更のためJev判定も停止しました。', true);
     initializationGeneration++;

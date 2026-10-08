@@ -26,7 +26,8 @@ backgroundの`src/hidden-authors/store.ts`だけが`chrome.storage.local`を操�
 - 取得コメントと下部の非表示投稿者一覧は名前を主表示にし、補足の「投稿者ID」を開くと内部IDを確認できる。未取得名・ID-only recordは「名前不明」と表示し、推測やAPI補完をしない。同名でも照合・解除は安定したchannel IDによって個別に行う。解除ボタンのaria-labelにも名前とIDを含める。
 - 名前更新もrevision/current世代を照合し、未登録IDの名前更新から非表示を新規登録しない。遅い判定の登録には同一video/author/revision/collectionに属する保持中の最新取得名を使い、cached判定から既存の名前を戻さない。名前と取得順は既存の60秒の観測Map内だけに保持し、TTLや件数上限を変更しない。
 - 解除後は`ids`と`displayNames`から対象を除くが、video/authorに紐づくrevision metadataはlocalに残る。リストが空でも保存record自体は削除しない。「非表示解除」は当該投稿者に関する保存データの完全消去ではない。
-- 自動期限、30日削除、同期、キー削除への連動消去、revisionを完全消去する専用UIは実装していない。利用条件の保留をこの実装で解消したとは扱わない。
+- 設定の独立カード「全配信の非表示データを削除」は、確認・キャンセルを経て全`hiddenAuthors.`項目（ID・名前・revision・空record）を削除する。APIキー・threshold・他localとAPI待機期限は残す。取得・判定を停止し、全配信epochとstore queue epochで古い取得／判定／登録／名前更新／個別解除を失効させる。実行中writeは完了を待ってから削除し、readbackで残存があれば失敗とする。monitorへ通知し、contentは既存全iframe/popoutの定期更新で復元する。明示再開後の新しい取得・判定は通常動作する。
+- 自動期限、30日削除、同期、キー削除への連動消去は実装していない。全配信削除UIにより利用条件の保留を解消したとは扱わない。
 - 本文、DOM本文、message ID履歴、判定結果全体はこのstoreへ保存しない。表示名だけを表示用metadataとして保存し、非表示コメントarchiveは追加しない。sync/Web localStorageは使わない。名前はJevのtarget/historyへ送らず、判定やidentity判断にも使わない。
 - キー用の`initializeCredentialStorage()`と同じ`TRUSTED_CONTEXTS`gateをawaitしてからlocalを読み書きする。contentからlocalを直接読むことは許可しない。
 

@@ -79,6 +79,13 @@ test('MV3: official→Jev→既存/新着非表示、同名別author・iframe/po
  await expect(monitor.getByRole('status')).toContainText('一時的に利用できません',{timeout:15000});
  await expect(frame.locator('#existing')).toBeHidden();
  const result=await options.evaluate(()=>chrome.runtime.sendMessage({type:'hidden.list',videoId:'abcdefghijk'}));expect(result).toEqual({ok:false});
+ await options.getByRole('button',{name:'全配信の非表示データを削除',exact:true}).click();
+ await options.getByRole('dialog').getByRole('button',{name:'削除する',exact:true}).click();
+ await expect(options.getByTestId('hidden-clear-status')).toContainText('削除しました');
+ await expect(monitor.getByRole('status')).toContainText('非表示データの削除');
+ await expect(monitor.locator('#hidden-authors li')).toHaveCount(0);
+ await expect(monitor.getByTestId('jev-status')).toContainText('停止');
+ await expect(frame.locator('#existing')).toBeVisible();await expect(popout.locator('#existing')).toBeVisible();
  }finally{await context.close();await rm(profile,{recursive:true,force:true});}
 });
 
