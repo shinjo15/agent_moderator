@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { apiResponse } from '../tests/fixtures/jev';
+import { confirmUsage } from './fixtures/confirm-usage';
 declare const chrome: { tabs: { create(options: { url: string; active: boolean }): Promise<unknown> }; runtime: { sendMessage(message: unknown): Promise<unknown> } };
 const video = 'abcdefghijk';
 const cases = [
@@ -44,6 +45,7 @@ test('MV3 threshold: 実policy/runtime/非表示・0/1・遅延snapshot/cached�
       await route.fulfill({ json: apiResponse({ attack: cases[current].score }) });
     });
     const options = await context.newPage(); await options.goto(`chrome-extension://${id}/options.html`);
+    await confirmUsage(options);
     for (const provider of ['YouTube', 'Jev']) {
       await options.getByLabel(`${provider} APIキー`).fill(`synthetic-${provider}`);
       await options.getByRole('button', { name: `${provider}キーを保存`, exact: true }).click();

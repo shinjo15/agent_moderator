@@ -51,10 +51,10 @@ test('public copy: Jevの全エラー表示に次操作がありprovider本文�
     await page.goto(`chrome-extension://${id}/monitor.html`);
     const enable = page.getByRole('button', { name: 'Jev判定を有効化・再開', exact: true });
     await expect(enable).toBeEnabled();
-    for (const code of ['missingKey', 'auth', 'validation', 'rateLimited', 'overloaded', 'network', 'invalidResponse', 'aborted', 'api']) {
+    for (const code of ['confirmationRequired', 'missingKey', 'auth', 'validation', 'rateLimited', 'overloaded', 'network', 'invalidResponse', 'aborted', 'api']) {
       await page.evaluate(code => Object.assign(globalThis, { copyError: code }), code);
       await enable.click();
-      await expect(page.getByTestId('jev-status')).toContainText(/保存|再開|更新/);
+      await expect(page.getByTestId('jev-status')).toContainText(/確認|保存|再開|更新/);
       await expect(page.getByTestId('jev-status')).toContainText('停止');
       await expect(page.locator('body')).not.toContainText('synthetic-private-provider-error');
       expect((await page.locator('.monitor-note, .monitor-notice').allTextContents()).join(' ')).not.toMatch(technical);

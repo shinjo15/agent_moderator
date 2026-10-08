@@ -10,10 +10,11 @@ export type ModerationResult = {
   malicious?: boolean; reasons: (Category | 'burst')[];
   jev: 'evaluated' | 'disabled' | 'unjudged' | 'failed'; evaluation?: Evaluation; threshold?: number; error?: JevError;
 };
-export function createModeration({ client, readKey, session, now = Date.now, readThreshold = async () => DEFAULT_THRESHOLD }: {
+export function createModeration({ client, readKey, session, now = Date.now, readThreshold = async () => DEFAULT_THRESHOLD, readConfirmation = async () => false }: {
   client: JevClient; readKey: () => Promise<string | undefined>;
   session?: Pick<SessionStorage, 'get' | 'set'>; now?: () => number;
   readThreshold?: () => Promise<number>;
+  readConfirmation?: () => Promise<boolean>;
 }) {
   const history = createHistory({ now });
   type Record = { authorChannelId: string; burst: Context['burst']; allowed: boolean; result?: ModerationResult };
@@ -42,11 +43,12 @@ export function createModeration({ client, readKey, session, now = Date.now, rea
   async function enable() {
     const current = generation;
     try {
+      if (!await readConfirmation()) { stop(); return { ok: false as const, error: { code: 'confirmationRequired' as const } }; }
       const stored = (await session?.get(['jev.notBefore']))?.['jev.notBefore'];
       if (typeof stored === 'number' && Number.isFinite(stored)) notBefore = Math.max(notBefore, stored);
       if (now() < notBefore) return { ok: false as const, error: { code: 'rateLimited' as const, retryAfterMillis: notBefore - now() } };
       if (!await readKey()) return { ok: false as const, error: { code: 'missingKey' as const } };
-    } catch { return { ok: false as const, error: { code: 'network' as const } }; }
+    } catch { stop(); return { ok: false as const, error: { code: 'network' as const } }; }
     if (current !== generation) return { ok: false as const, error: { code: 'aborted' as const } };
     enabled = true;
     return { ok: true as const };
@@ -72,6 +74,15 @@ export function createModeration({ client, readKey, session, now = Date.now, rea
           if (key && now() < notBefore) {
             Object.assign(base, { jev: 'failed', error: { code: 'rateLimited', retryAfterMillis: notBefore - now() } }); stop();
           } else if (key) {
+            // Re-read in the background at the actual send, not just enable/enqueue time.
+            if (!await readConfirmation()) {
+              stop();
+              return { ok: true as const, value: { ...base, jev: 'failed' as const, error: { code: 'confirmationRequired' as const } } };
+            }
+            if (current !== generation) return { ok: false as const, error: { code: 'aborted' as const } };
+            if (records.get(id) !== record) return { ok: false as const, error: { code: 'forbidden' as const } };
+            state = history.context(id);
+            if (!state) return { ok: true as const, value: { ...base, jev: 'unjudged' as const } };
             controller = new AbortController();
             const result = await client.evaluate(state, key, controller.signal);
             state = undefined;

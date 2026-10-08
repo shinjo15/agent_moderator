@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { apiResponse } from '../tests/fixtures/jev';
+import { confirmUsage } from './fixtures/confirm-usage';
 declare const chrome: { tabs: { create(o: {url:string;active:boolean}):Promise<unknown> }; runtime:{sendMessage(m:unknown):Promise<unknown>}; storage:{local:{get(keys:string[]):Promise<Record<string,unknown>>;set(v:Record<string,unknown>):Promise<void>}} };
 const author = 'UCabcdefghijklmnopqrstuv'; const other = 'UCzyxwvutsrqponmlkjihgfe'; const video = 'abcdefghijk';
 const chat = `<!doctype html><body><script>
@@ -32,6 +33,7 @@ test('MV3: official→Jev→既存/新着非表示、同名別author・iframe/po
  await route.fulfill({json:apiResponse({attack:0.8})});
  });
  const options=await context.newPage();await options.goto(`chrome-extension://${id}/options.html`);
+ await confirmUsage(options);
  for(const p of ['YouTube','Jev']){await options.getByLabel(`${p} APIキー`).fill(`synthetic-${p}`);await options.getByRole('button',{name:`${p}キーを保存`,exact:true}).click();await expect(options.getByLabel(`${p} APIキー`)).toHaveValue('');}
  const youtube=await context.newPage();await youtube.goto(`https://www.youtube.com/watch?v=${video}`);await youtube.bringToFront();
  const cdp=await context.browser()!.newBrowserCDPSession();const {targetInfos}=await cdp.send('Target.getTargets',{filter:[{type:'tab',exclude:false}]});

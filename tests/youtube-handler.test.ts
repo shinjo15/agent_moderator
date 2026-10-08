@@ -1,10 +1,13 @@
 import { expect, it, vi } from 'vitest';
 import { createYouTubeHandler } from '../src/youtube/background-handler';
 import { failure } from '../src/youtube/contracts';
-import { createModeration } from '../src/jev/moderation';
+import { createModeration as createUnconfirmedModeration } from '../src/jev/moderation';
 import { createJevClient } from '../src/jev/client';
 import { apiResponse, chatPost } from './fixtures/jev';
 import { createHiddenAuthors } from '../src/hidden-authors/store';
+import { createYouTubeClient } from '../src/youtube/client';
+const createModeration = (deps: Parameters<typeof createUnconfirmedModeration>[0]) =>
+  createUnconfirmedModeration({ readConfirmation: async () => true, ...deps });
 
 function setup() {
   const values: Record<string, unknown> = {};
@@ -20,13 +23,132 @@ function setup() {
     listMessages: vi.fn().mockResolvedValue({ ok: true, value: { messages: [], nextPageToken: 'next', pollingIntervalMillis: 8000, ended: false } }) };
   const readApiKey = vi.fn(async () => 'fixture-key' as string | undefined);
   let now = 0;
-  const deps = { session, tabs, client, readApiKey, initialize: vi.fn(async () => {}),
+  const deps = { session, tabs, client, readApiKey, readConfirmation: vi.fn(async () => true), initialize: vi.fn(async () => {}),
     runtime: { id: 'test', getURL: (path: string) => `chrome-extension://test/${path}`, sendMessage: vi.fn(async () => {}) }, now: () => now };
   return { handler: createYouTubeHandler(deps), deps, values, advance: (n: number) => { now += n; } };
 }
 const popup = { id: 'test', url: 'chrome-extension://test/popup.html' };
 const monitor = { id: 'test', url: 'chrome-extension://test/monitor.html', tab: { id: 10 } };
 const open = { type: 'youtube.openMonitor', tabId: 9, videoId: 'abcdefghijk' };
+it('旧runtime経由の未確認・読取失敗・確認喪失ではYouTube実通信しない', async () => {
+  const { deps, advance } = setup();
+  const readConfirmation = vi.fn(async () => false);
+  const handler = createYouTubeHandler({ ...deps, readConfirmation });
+  await handler.handle(open, popup);
+  const resolve = { type: 'youtube.resolve', requestId: 'r', videoId: open.videoId };
+  expect(await handler.handle(resolve, monitor)).toMatchObject({ ok: false, error: { code: 'confirmationRequired' } });
+  expect(deps.client.resolveVideo).not.toHaveBeenCalled();
+  readConfirmation.mockRejectedValueOnce(new Error('private'));
+  expect(await handler.handle(resolve, monitor)).toMatchObject({ ok: false });
+  expect(deps.client.resolveVideo).not.toHaveBeenCalled();
+  readConfirmation.mockResolvedValue(true);
+  expect(await handler.handle(resolve, monitor)).toMatchObject({ ok: true });
+  advance(5000); readConfirmation.mockResolvedValue(false);
+  expect(await handler.handle({ type: 'youtube.list', requestId: 'l', liveChatId: 'chat-1' }, monitor)).toMatchObject({ ok: false });
+  expect(deps.client.listMessages).not.toHaveBeenCalled();
+});
+
+it('複数画面から確認状態が変更されたら準備中の旧取得は再確認済みでも送信しない', async () => {
+  const { handler, deps } = setup();
+  await handler.handle(open, popup);
+  const reading = deferred(); const key = deferred<string | undefined>();
+  deps.readApiKey.mockImplementationOnce(() => { reading.resolve(); return key.promise; });
+  const pending = handler.handle({ type: 'youtube.resolve', requestId: 'preparing', videoId: open.videoId }, monitor);
+  await reading.promise;
+  await handler.confirmationChanged(); key.resolve('fixture-key');
+  expect(await pending).toMatchObject({ ok: false, error: { code: 'aborted' } });
+  expect(deps.client.resolveVideo).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['ready', 'youtube.resolve'], ['ready', 'jev.enable'], ['binding', 'youtube.resolve'],
+  ['binding', 'jev.enable'], ['target', 'youtube.resolve'], ['target', 'jev.enable'],
+] as const)('確認変更は%s待ちの旧%sを失効し明示再開だけ許可する', async (wait, type) => {
+    const { deps, values } = setup();
+    values['youtube.monitorBinding'] = { monitorTabId: 10, targetTabId: 9, videoId: open.videoId };
+    const entered = deferred(); const release = deferred();
+    if (wait === 'ready') deps.initialize.mockImplementationOnce(async () => { entered.resolve(); await release.promise; });
+    if (wait === 'binding') deps.session.get.mockImplementationOnce(async keys => {
+      const snapshot = Object.fromEntries(keys.map(key => [key, values[key]]));
+      entered.resolve(); await release.promise; return snapshot;
+    });
+    if (wait === 'target') deps.tabs.get.mockImplementationOnce(async id => {
+      entered.resolve(); await release.promise; return { id, url: 'https://www.youtube.com/watch?v=abcdefghijk' };
+    });
+    const youtubeFetch = vi.fn(async () => new Response(JSON.stringify({ items: [{ id: open.videoId, liveStreamingDetails: { activeLiveChatId: 'chat-1' } }] })));
+    const jevFetch = vi.fn(async () => new Response(JSON.stringify(apiResponse())));
+    const moderation = createModeration({ client: createJevClient(jevFetch), readKey: async () => 'synthetic' });
+    const handler = createYouTubeHandler({ ...deps, moderation, client: createYouTubeClient(youtubeFetch) });
+    const request = { type, requestId: 'old', videoId: open.videoId };
+    const pending = handler.handle(type === 'jev.enable' ? { type } : request, monitor);
+    await entered.promise; await handler.confirmationChanged(); release.resolve();
+    expect(await pending).toEqual(failure('aborted'));
+    moderation.observe([chatPost('stale-enable')]); await moderation.evaluate('stale-enable');
+    expect(youtubeFetch).not.toHaveBeenCalled(); expect(jevFetch).not.toHaveBeenCalled();
+    expect(await handler.handle(type === 'jev.enable' ? { type } : { ...request, requestId: 'new' }, monitor)).toMatchObject({ ok: true });
+    if (type === 'jev.enable') { moderation.observe([chatPost('explicit-resume', 1)]); await moderation.evaluate('explicit-resume'); expect(jevFetch).toHaveBeenCalledTimes(1); }
+    else expect(youtubeFetch).toHaveBeenCalledTimes(1);
+    moderation.reset();
+});
+
+it('確認変更で実行前queueの旧取得も失効し送信やcooldownを作らない', async () => {
+  const { handler, deps, values } = setup();
+  await handler.handle(open, popup);
+  const entered = deferred(); const release = deferred<string | undefined>();
+  deps.readApiKey.mockImplementationOnce(() => { entered.resolve(); return release.promise; });
+  const first = handler.handle({ type: 'youtube.resolve', requestId: 'first', videoId: open.videoId }, monitor);
+  await entered.promise;
+  const queued = handler.handle({ type: 'youtube.resolve', requestId: 'queued', videoId: open.videoId }, monitor);
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  await handler.confirmationChanged(); release.resolve('fixture-key');
+  expect(await first).toEqual(failure('aborted')); expect(await queued).toEqual(failure('aborted'));
+  expect(deps.client.resolveVideo).not.toHaveBeenCalled();
+  expect(values['youtube.cooldown']).toBeUndefined();
+});
+
+it('monitor初期化のstopCollectionと並行する表示専用statusは有効なbindingを返す', async () => {
+  const { handler, deps } = setup();
+  const moderation = createModeration({ client: createJevClient(vi.fn()), readKey: async () => 'synthetic' });
+  const next = createYouTubeHandler({ ...deps, moderation });
+  await handler.handle(open, popup);
+  const entered = deferred(); const release = deferred();
+  deps.tabs.get.mockImplementationOnce(async id => {
+    entered.resolve(); await release.promise; return { id, url: 'https://www.youtube.com/watch?v=abcdefghijk' };
+  });
+  const status = next.handle({ type: 'youtube.status' }, monitor);
+  await entered.promise;
+  expect(await next.handle({ type: 'jev.stopCollection' }, monitor)).toEqual({ ok: true });
+  release.resolve();
+  expect(await status).toMatchObject({ ok: true, value: { videoId: open.videoId, credentialsAvailable: true } });
+});
+
+it('確認変更はJev enable内部のキー待ちとJev評価queueも失効させる', async () => {
+  const { deps } = setup();
+  const entered = deferred(); const release = deferred<string | undefined>();
+  const readKey = vi.fn(async () => 'synthetic' as string | undefined);
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(apiResponse())));
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey });
+  const handler = createYouTubeHandler({ ...deps, moderation });
+  await handler.handle(open, popup);
+  readKey.mockImplementationOnce(() => { entered.resolve(); return release.promise; });
+  const enabling = handler.handle({ type: 'jev.enable' }, monitor);
+  await entered.promise; await handler.confirmationChanged(); release.resolve('synthetic');
+  expect(await enabling).toEqual(failure('aborted'));
+  moderation.observe([chatPost('no-auto-enable')]); await moderation.evaluate('no-auto-enable');
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(await handler.handle({ type: 'jev.enable' }, monitor)).toEqual({ ok: true });
+  const evaluating = deferred(); const finish = deferred<string | undefined>();
+  readKey.mockImplementationOnce(() => { evaluating.resolve(); return finish.promise; });
+  moderation.observe([chatPost('first', 1), chatPost('queued', 2)]);
+  const first = handler.handle({ type: 'jev.evaluate', id: 'first' }, monitor);
+  await evaluating.promise;
+  const queued = handler.handle({ type: 'jev.evaluate', id: 'queued' }, monitor);
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  await handler.confirmationChanged(); finish.resolve('synthetic');
+  expect(await first).toEqual(failure('aborted')); expect(await queued).toEqual(failure('aborted'));
+  expect(fetcher).not.toHaveBeenCalled(); moderation.reset();
+});
+
 it('遅い取得中の201件目は直列キューへ蓄積せず即時失敗する', async () => {
   const { handler, deps } = setup();
   await handler.handle(open, popup);
