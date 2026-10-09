@@ -2,9 +2,9 @@ import type { MessageSender } from './extension-runtime';
 import { createBoundedQueue } from './retention';
 
 // Bump when the explained usage/data conditions change; old confirmations never migrate automatically.
-export const CONFIRMATION_VERSION = 1;
+export const CONFIRMATION_VERSION = 2;
 export const CONFIRMATION_KEY = 'usage.confirmation';
-export const confirmationRequired = '設定で利用条件・データの扱いを確認してください。確認できるまで外部送信しません。';
+export const confirmationRequired = '設定で利用規約案・プライバシーポリシー案とデータの扱いに同意してください。同意できるまで外部送信しません。';
 type Storage = { get(keys: string[]): Promise<Record<string, unknown>>; set(values: Record<string, unknown>): Promise<void> };
 export function createConfirmation({ storage, initialize }: { storage: Storage; initialize(): Promise<void> }) {
   const exclusive = createBoundedQueue();
@@ -48,9 +48,9 @@ export function createConfirmation({ storage, initialize }: { storage: Storage; 
           // Best effort for an ambiguous rejected final write; this is not a durable
           // guarantee if storage applies that write but rejects both it and rollback.
           if (writeAttempted) try { await storage.set({ [CONFIRMATION_KEY]: { version: 0 } }); } catch { /* Remain blocked. */ }
-          return { ok: false as const, error: '利用条件の確認を保存できませんでした。もう一度確認してください。' };
+          return { ok: false as const, error: '同意を保存できませんでした。もう一度同意してください。' };
         }
-      }).catch(() => ({ ok: false as const, error: '利用条件の確認を保存できませんでした。もう一度確認してください。' }));
+      }).catch(() => ({ ok: false as const, error: '同意を保存できませんでした。もう一度同意してください。' }));
     },
   };
 }

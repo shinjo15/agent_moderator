@@ -6,6 +6,19 @@ Issue #27で全配信の非表示データ削除UI・停止と世代隔離を追
 
 [利用者向けポリシー案](../privacy.md) ／ [既存の規約確認記録](../policy-review.md) ／ [提供元への問い合わせ文案](provider-inquiries.md)
 
+## Issue #30：開発版の規約案・明示同意導線
+
+- [利用規約案](../terms.md)は一般利用者向けの短い文書とし、監査論点や調査Sourcesはこのチェック側に分離する。施行日未定・正式施行ではない状態を、privacy・設定画面・同梱規約で一致させる。
+- `src/confirmation-panel.ts`の既存panelに規約リンクと明示同意checkboxを置き、「同意を保存」で保存する。`CONFIRMATION_VERSION = 2`とし、literalの旧版1は取得・保存とも拒否して自動移行しない。未同意・旧版・読取失敗・保存失敗でYouTube取得／Jev送信を開始せず、同意だけでは通信を開始しない。キー保存や既存非表示の表示制御まで遮断する変更ではない。
+- mainの新しい規約URLは未マージ時に404となるため、スクリプト不要の`public/terms.html`を既存buildの静的copyで`dist/terms.html`へ同梱し、設定UIから`runtime.getURL('terms.html')`で開く。zipも明示allowlistへ追加する。公開用MarkdownとHTMLの本文・リンクの一致をテストする。新しい初回画面、ライブラリ、汎用Markdown変換器、manifest権限やCSPの変更はない。
+- [MetaMask公式公開ソース](https://github.com/MetaMask/metamask-extension/blob/5272c5962b2db55aba00d91a06bbe735df7f6644/ui/pages/onboarding-flow/welcome/welcome.js)に、初期falseの規約checkbox、規約リンク、未チェック時の作成／インポートボタン無効化、進む操作で同意日時を保存する実装がある。これは調査時のdevelop上の対象ファイルの最終変更commitを固定した参照で、現ストア配布版の画面は未実測。[v11.0.0の同ファイル](https://github.com/MetaMask/metamask-extension/blob/v11.0.0/ui/pages/onboarding-flow/welcome/welcome.js)は旧版の実装例として区別する。公式の規約掲載だけをUI確認の証拠にしない。他拡張の契約内容・自動同意条件を本拡張へ転用しない。
+- [Chrome Disclosure Requirements](https://developer.chrome.com/docs/webstore/program-policies/disclosure-requirements)は、扱うデータと用途の目立つ開示、affirmative and informed consent、インストール前の開示・同意と変更時の開示を要求する。[Chrome FAQ §10](https://developer.chrome.com/docs/webstore/program-policies/user-data-faq)は規約・privacyだけへの説明埋め込みでは足りず、製品UIでデータ処理前の明確な同意操作を求める。既存送信説明をcheckboxより前に維持するが、本実装だけでインストール前の要件や同意前のキー保存の適合まで完了とはしない。
+- [YouTube Developer Policies III.A](https://developers.google.com/youtube/terms/developer-policies)は自前の規約でYouTube規約への拘束を説明・リンクし、機能利用前のprivacy同意、目立ち常時アクセス可能な開示を求める。API gateの回帰はこの用途の全面的な適合性の証明ではなく、既存非表示・キー保存等も含む適用範囲は公開前に照合する。
+- 準拠法・裁判所・年齢・配布価格・賠償上限・全面免責・リバースエンジニアリング禁止など未承認の契約条件は規約案に設定しない。数値判定項目は規約本文へ重複せず、privacy／onboardingへ委ねる。提供元の用途適合、第三者の権利・送信同意、長期保存、暗号化、Limited Use等の既存未達事項は引き続き未達。
+- `tests/background.test.ts`、共通E2E確認fixture、同意・通信境界・popup再起動の回帰を版2へ整合し、literal1の旧版拒否を保持する。文書テストと`e2e/terms-consent.spec.ts`で未チェック、同梱規約を実際に開くこと、安全リンク、送信説明→checkbox→保存のDOM順を確認する。実API・本人の通常Windows Chromeでの確認は別。
+
+以下の「この作業」「今回」は従来のprivacy整備時点の記録。Issue #30の変更・検証範囲は上記と子担当の実行結果で区別し、過去の未公開・親によるpackage予定を現在の状態と取り違えない。
+
 ## 1. この作業で整備した範囲
 
 - 一般利用者向けの取得・送信・保存・停止・解除・削除の説明を、現在の実装に合わせた。

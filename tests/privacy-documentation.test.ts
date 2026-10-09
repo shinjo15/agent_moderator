@@ -13,7 +13,7 @@ it('一般利用者向けの日本語ポリシー案は更新日と未確定の�
   expect(text).toContain('GitHub mainに掲載中');
   expect(text).not.toContain('公開ページへまだ反映していません');
   expect(text).toContain('usage.confirmation');
-  expect(text).toContain('再確認');
+  expect(text).toContain('再同意');
   expect(text).not.toContain('Issue #5統合済み');
 });
 
