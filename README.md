@@ -1,5 +1,7 @@
 # Agent Moderator
 
+[利用規約（案）](docs/terms.md)と[プライバシーポリシー（案）](docs/privacy.md)は施行日未定です。開発版では既存の設定画面で案と送信・費用説明を確認し、チェックして「同意を保存」を押します。以前の版1の確認は版2へ自動移行せず、再同意が必要です。同意だけでAPI通信は開始しません。規約は同梱の`terms.html`で読めるため、未マージのGitHub URLを参照する必要はありません。正式施行・一般配布・提供元の承認とは別です。
+
 初めて使う方は [日本語導入手順](docs/onboarding.md)、[プライバシー・削除](docs/privacy.md)、[公式一次資料・公開前の保留条件](docs/policy-review.md) を参照してください。独自バックエンド不要でもGoogle / TypeSafeへの外部通信は必要です。#5の実装・実DOMの範囲は [Issue #5の検証記録](docs/verification/issue-5.md)、#6の文書統合と今回の検証は [Issue #6の検証記録](docs/verification/issue-6.md) で区別しています。
 
 YouTube Live向けChrome拡張機能です。MV3基盤、利用者自身のAPIキー管理、YouTube公式APIからのライブチャット継続取得、明示有効化したJev評価、配信別の投稿者ローカル非表示・一覧確認・解除に対応します。BAN・投稿/削除は対象外です。Jevの契約・業務ルール・送信範囲は [docs/jev-moderation.md](docs/jev-moderation.md)、非表示の技術契約・対応範囲は [docs/local-author-filter.md](docs/local-author-filter.md)、#5の検証根拠は [docs/verification/issue-5.md](docs/verification/issue-5.md) を参照してください。
@@ -93,7 +95,7 @@ Jev評価を使う場合はJevキーも設定し、monitorの「Jev判定を有�
 - `src/hidden-authors/`: 配信別local store、解除revision、sender/video境界、monitor一覧・解除。
 - `src/content-ids.ts`: MAINの最小IDブリッジ。本文・キー・非表示リストは扱わない。
 - `src/content.ts`: isolated側の対象videoのIDs取得、既存/新着/再利用rendererの非表示と復元。
-- `scripts/build.mjs`: dist生成。`scripts/package.mjs`: 明示した10ファイルのみzip化。fixture/キー/ソースは含めない。
+- `scripts/build.mjs`: publicの静的規約ページを含むdist生成。`scripts/package.mjs`: `terms.html`を含む明示allowlistのみzip化。fixture/キー/ソースは含めない。
 - `tests/`: manifest・配布契約。`e2e/`: 実ブラウザ検証。
 - `docs/verification/summary.md`: Issue #1の検証記録。`docs/verification/issue-2.md`: キー管理の縦RED→GREEN・実ブラウザ・最終検証。生ログはGit対象外。
 
