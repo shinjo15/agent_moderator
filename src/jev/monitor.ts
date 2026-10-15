@@ -5,6 +5,7 @@ import { createTransientMap, MAX_PENDING_EVALUATIONS, TRANSIENT_TTL_MILLIS } fro
 import { createNotice } from '../ui-notice';
 import { confirmationRequired } from '../confirmation';
 const failures: Record<JevError['code'], string> = {
+  definition: 'Jevの判定定義を読み込めませんでした。定義ファイルを確認し、再開ボタンを押してください。',
   confirmationRequired,
   missingKey: '設定でJev APIキーを保存してください。', auth: 'Jev APIキーの認証に失敗しました。設定でキーを確認し、保存し直してください。', validation: 'Jevに判定を依頼できませんでした。時間をおいて再開し、問題が続く場合は拡張機能の更新を確認してください。',
   rateLimited: 'Jevの利用制限です。時間をおいて再開ボタンを押してください。', overloaded: 'Jevが混雑しています。時間をおいて再開ボタンを押してください。',

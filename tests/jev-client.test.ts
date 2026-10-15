@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { createJevClient } from '../src/jev/client';
+import { createJevClient } from './fixtures/jev-client';
 import { categories, decide } from '../src/jev/policy';
 
 const response = (value = 0.8) => ({ model: 'jev-latest', answers: Object.fromEntries(categories.map(key => [key, { type: 'noul', noul: value }])), usage: { input_tokens: 123, output_tokens: 45 } });
