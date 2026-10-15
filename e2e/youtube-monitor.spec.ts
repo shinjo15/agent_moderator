@@ -75,7 +75,7 @@ test('production MV3: activeTabから選択しYouTubeタブ前面でもfixture�
     expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'jev.enable' })))
       .toMatchObject({ ok: false, error: { code: 'confirmationRequired' } });
     await monitor.getByRole('button', { name: '取得を開始' }).click();
-    await expect(monitor.getByRole('status')).toContainText('設定で利用条件');
+    await expect(monitor.getByRole('status')).toContainText('設定で利用規約案');
     expect(videoCalls).toBe(0); expect(tokens).toHaveLength(0);
     await confirmUsage(options);
     await monitor.getByRole('button', { name: '取得を開始' }).click();

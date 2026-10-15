@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { apiResponse } from '../tests/fixtures/jev';
 import { confirmUsage } from './fixtures/confirm-usage';
+import { CONFIRMATION_VERSION } from '../src/confirmation';
 declare const chrome: { tabs: { create(o: {url:string;active:boolean}):Promise<unknown> }; runtime:{sendMessage(m:unknown):Promise<unknown>}; storage:{local:{get(keys:string[]):Promise<Record<string,unknown>>;set(v:Record<string,unknown>):Promise<void>}} };
 const author = 'UCabcdefghijklmnopqrstuv'; const other = 'UCzyxwvutsrqponmlkjihgfe'; const video = 'abcdefghijk';
 const chat = `<!doctype html><body><script>
@@ -84,8 +85,8 @@ test('MV3: official→Jev→既存/新着非表示、同名別author・iframe/po
  await options.getByRole('button',{name:'全配信の非表示データを削除',exact:true}).click();
  await options.getByRole('dialog').getByRole('button',{name:'削除する',exact:true}).click();
  await expect(options.getByTestId('hidden-clear-status')).toContainText('削除しました');
- expect(await options.evaluate(()=>chrome.runtime.sendMessage({type:'confirmation.get'}))).toEqual({ok:true,value:{confirmed:true,version:1}});
- expect(await worker.evaluate(async()=> (await chrome.storage.local.get(['usage.confirmation']))['usage.confirmation'])).toEqual({version:1});
+ expect(await options.evaluate(()=>chrome.runtime.sendMessage({type:'confirmation.get'}))).toEqual({ok:true,value:{confirmed:true,version:CONFIRMATION_VERSION}});
+ expect(await worker.evaluate(async()=> (await chrome.storage.local.get(['usage.confirmation']))['usage.confirmation'])).toEqual({version:CONFIRMATION_VERSION});
  await expect(monitor.getByRole('status')).toContainText('非表示データの削除');
  await expect(monitor.locator('#hidden-authors li')).toHaveCount(0);
  await expect(monitor.getByTestId('jev-status')).toContainText('停止');

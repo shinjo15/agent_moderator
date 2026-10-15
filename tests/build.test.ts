@@ -7,7 +7,7 @@ it('分離した入口だけを自己完結の配布物にビルドする', () =
   const result = spawnSync(process.execPath, ['scripts/build.mjs'], { encoding: 'utf8' });
   expect(result.status, result.stderr).toBe(0);
   expect(readdirSync('dist').sort()).toEqual([
-    'background.js', 'content-ids.js', 'content.js', 'manifest.json', 'monitor.html', 'monitor.js', 'options.html', 'options.js', 'popup.html', 'popup.js',
+    'background.js', 'content-ids.js', 'content.js', 'manifest.json', 'monitor.html', 'monitor.js', 'options.html', 'options.js', 'popup.html', 'popup.js', 'terms.html',
   ]);
   expect(JSON.parse(readFileSync('dist/manifest.json', 'utf8')))
     .toEqual(JSON.parse(readFileSync('public/manifest.json', 'utf8')));

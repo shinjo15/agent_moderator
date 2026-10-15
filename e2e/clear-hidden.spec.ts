@@ -94,8 +94,8 @@ test('MV3 統合: 未確認でも全削除可能、削除後の未確認明示�
     await context.route('https://www.googleapis.com/youtube/v3/**', route => { youtubeCalls++; return route.abort(); });
     await context.route('https://api.typesafe.ai/**', route => { jevCalls++; return route.abort(); });
     const watchOpened = context.waitForEvent('page');
-    const target = await worker.evaluate(() => chrome.tabs.create({ url: 'https://www.youtube.com/watch?v=abcdefghijk', active: false }));
-    await watchOpened;
+    const target = await worker.evaluate(() => chrome.tabs.create({ url: 'about:blank', active: false }));
+    const watch = await watchOpened; await watch.goto('https://www.youtube.com/watch?v=abcdefghijk');
     const monitorOpened = context.waitForEvent('page');
     await worker.evaluate(async ({ targetTabId, author }) => {
       const monitor = await chrome.tabs.create({ url: 'about:blank', active: false });
@@ -106,7 +106,7 @@ test('MV3 統合: 未確認でも全削除可能、削除後の未確認明示�
     const monitor = await monitorOpened; await monitor.goto(`chrome-extension://${id}/monitor.html`);
     await expect(monitor.getByRole('button', { name: '取得を開始', exact: true })).toBeEnabled();
     const options = await context.newPage(); await options.goto(`chrome-extension://${id}/options.html`);
-    await expect(options.getByTestId('confirmation-status')).toContainText('未確認');
+    await expect(options.getByTestId('confirmation-status')).toContainText('未同意');
     await options.getByRole('button', { name: '全配信の非表示データを削除', exact: true }).click();
     await options.getByRole('dialog').getByRole('button', { name: '削除する', exact: true }).click();
     await expect(options.getByTestId('hidden-clear-status')).toContainText('削除しました');
@@ -124,7 +124,7 @@ test('MV3 統合: 未確認でも全削除可能、削除後の未確認明示�
       .toMatchObject({ ok: false, error: { code: 'confirmationRequired' } });
     expect(youtubeCalls).toBe(0); expect(jevCalls).toBe(0);
     expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.get' })))
-      .toEqual({ ok: true, value: { confirmed: false, version: 1 } });
+      .toEqual({ ok: true, value: { confirmed: false, version: 2 } });
     expect((await worker.evaluate(() => chrome.storage.session.get(null)))['hidden.collectionPaused']).toBe(true);
   } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
 });

@@ -1,12 +1,13 @@
 import { expect, it, vi } from 'vitest';
 import { createHiddenAuthors } from '../src/hidden-authors/store';
+import { CONFIRMATION_VERSION } from '../src/confirmation';
 const video = 'abcdefghijk'; const author = 'UCabcdefghijklmnopqrstuv';
 function fixture() {
   const values: Record<string, unknown> = {
     [`hiddenAuthors.${video}`]: { ids: [author], displayNames: { [author]: '名前' }, revisions: {} },
     'hiddenAuthors.zyxwvutsrqp': { ids: [], revisions: { [author]: 3 } },
     'apiKey.youtube': 'synthetic', 'apiKey.jev': 'synthetic', 'moderation.threshold': 0.8,
-    'youtube.cooldown': { notBefore: 99999 }, 'usage.confirmation': { version: 1 }, unrelated: true,
+    'youtube.cooldown': { notBefore: 99999 }, 'usage.confirmation': { version: CONFIRMATION_VERSION }, unrelated: true,
   };
   const storage = { get: vi.fn(async (_keys: string[] | null) => structuredClone(values)),
     set: vi.fn(async (data: Record<string, unknown>) => { Object.assign(values, structuredClone(data)); }),
@@ -18,7 +19,7 @@ it('全配信の空/legacy/revision/nameを全件削除し他localを保持、�
   for (let n = 0; n < 1001; n++) values[`hiddenAuthors.${String(n).padStart(11, '0')}`] = {};
   await store.clearAll();
   expect(Object.keys(values).some(key => key.startsWith('hiddenAuthors.'))).toBe(false);
-  expect(values).toEqual({ 'apiKey.youtube': 'synthetic', 'apiKey.jev': 'synthetic', 'moderation.threshold': 0.8, 'youtube.cooldown': { notBefore: 99999 }, 'usage.confirmation': { version: 1 }, unrelated: true });
+  expect(values).toEqual({ 'apiKey.youtube': 'synthetic', 'apiKey.jev': 'synthetic', 'moderation.threshold': 0.8, 'youtube.cooldown': { notBefore: 99999 }, 'usage.confirmation': { version: CONFIRMATION_VERSION }, unrelated: true });
   expect(await createHiddenAuthors({ storage, initialize: async () => {} }).list(video)).toEqual([]);
   await store.add(video, author, 0, () => true, '新規');
   expect(await store.listAuthors(video)).toEqual([{ authorChannelId: author, displayName: '新規' }]);

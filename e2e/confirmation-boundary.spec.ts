@@ -47,8 +47,8 @@ test('MV3 background: 旧runtime/旧版/読取・保存失敗は通信0、Jev有
     }
     // Intentionally seed only the session binding: exercise old runtime requests without new UI checks.
     const watchOpened = context.waitForEvent('page');
-    const target = await worker.evaluate(() => chrome.tabs.create({ url: 'https://www.youtube.com/watch?v=abcdefghijk', active: false }));
-    await watchOpened;
+    const target = await worker.evaluate(() => chrome.tabs.create({ url: 'about:blank', active: false }));
+    const watch = await watchOpened; await watch.goto('https://www.youtube.com/watch?v=abcdefghijk');
     const monitorOpened = context.waitForEvent('page');
     await worker.evaluate(async targetTabId => {
       const monitor = await chrome.tabs.create({ url: 'about:blank', active: false });
@@ -56,7 +56,7 @@ test('MV3 background: 旧runtime/旧版/読取・保存失敗は通信0、Jev有
     }, target.id);
     const monitor = await monitorOpened; await monitor.goto(`chrome-extension://${id}/monitor.html`);
     await expect(monitor.getByRole('button', { name: '取得を開始', exact: true })).toBeEnabled();
-    for (const value of [undefined, { version: 0 }, { version: '1' }]) {
+    for (const value of [undefined, { version: 1 }, { version: 0 }, { version: '2' }]) {
       if (value !== undefined) {
         await monitor.evaluate(() => {
           const send = chrome.runtime.sendMessage.bind(chrome.runtime);
@@ -96,14 +96,15 @@ test('MV3 background: 旧runtime/旧版/読取・保存失敗は通信0、Jev有
       Object.assign(globalThis, { restoreConfirmationWrite: () => { chrome.storage.local.set = original; } });
       chrome.storage.local.set = async values => { if ('usage.confirmation' in values) throw new Error('private-write-error'); return original(values); };
     });
-    await options.getByLabel('利用条件・データの扱いを確認しました', { exact: true }).check();
-    await options.getByRole('button', { name: '利用条件の確認を保存', exact: true }).click();
+    await options.getByLabel('利用規約（案）とプライバシーポリシー（案）に同意し、データ送信・費用の説明を確認しました', { exact: true }).check();
+    await options.getByRole('button', { name: '同意を保存', exact: true }).click();
     await expect(options.getByTestId('confirmation-status')).toContainText('保存・取得できませんでした');
     expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'youtube.resolve', requestId: 'failed-save', videoId: 'abcdefghijk' })))
       .toMatchObject({ ok: false });
     expect(youtubeCalls).toBe(0); expect(jevCalls).toBe(0);
     await worker.evaluate(() => (globalThis as unknown as { restoreConfirmationWrite(): void }).restoreConfirmationWrite());
     await confirmUsage(options);
+    expect(youtubeCalls).toBe(0); expect(jevCalls).toBe(0);
     expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'jev.enable' }))).toEqual({ ok: true });
     expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'youtube.resolve', requestId: 'confirmed', videoId: 'abcdefghijk' }))).toMatchObject({ ok: true });
     // Test-only cooldown reset avoids a real-time sleep; production cooldown regressions are separate.

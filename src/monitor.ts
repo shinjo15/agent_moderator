@@ -115,7 +115,7 @@ runtime.onMessage.addListener((message, sender) => {
   }
   if (message.type === 'confirmation.changed') {
     monitor.stop(); jev.stop(confirmationRequired, true);
-    status.textContent = '利用条件の確認状態が変更されたため停止しました。設定を確認し、明示的に再開してください。';
+    status.textContent = '同意状態が変更されたため停止しました。設定で同意状態を確認し、明示的に再開してください。';
   }
   if (message.type === 'youtube.credentialsChanged' && 'available' in message && typeof message.available === 'boolean') {
     jev.stop('YouTubeキー変更のためJev判定も停止しました。', true);
