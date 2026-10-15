@@ -5,7 +5,9 @@
 Issue #3の公式YouTube取得を基盤に、取得したコメントの評価とmonitor表示だけを追加する。DOM非表示、BAN、投稿・削除、Issue #5は実装しない。キー管理の保存契約は変更しない。実キーは参照せず、synthetic/API fixtureだけで検証した。
 
 - `src/jev/client.ts`: background専用の固定endpoint HTTP client、timeout、HTTP分類、全項目の応答validation。
-- `src/jev/policy.ts`: 固定rubricとnoul評価値から悪質性を決める純粋policy。
+- `public/jev-questions.json`: instructions/criteria/typeの唯一の実行時原本。
+- `src/jev/questions.ts`: backgroundの同梱JSON読込・厳密検証・取消と20秒timeout。
+- `src/jev/policy.ts`: UI/照合用の7ラベルとnoul評価値から悪質性を決める純粋policy。prompt文字列は保持しない。
 - `src/jev/history.ts`: 既取得コメントの重複防止、必要な本文文脈と連投の時刻根拠を分離して管理。
 - `src/jev/moderation.ts`: opt-in、取得済みIDとの対応付け、直列通信、キー再確認、停止・世代・Retry-After調整。
 - `src/youtube/background-handler.ts`: #3の同一拡張ID・exact monitor URL・monitor tab binding・対象動画照合をJev要求にも適用。成功した実list結果だけを履歴へ渡す。
@@ -26,6 +28,18 @@ Issue #3の公式YouTube取得を基盤に、取得したコメントの評価�
 7項目を1 callのquestions mapへまとめ、それぞれ`type: noul`、固定instructions、true/false criteriaを指定する。noulは0〜1のyes評価値であり、別のconfidenceではない。score primitiveやconfidenceを悪質性の評価値として代用しない。
 
 応答は非空model、全7項目のanswers（余分な項目も拒否）、各answer.type=noul、有限な0〜1のnoul、非負の安全整数usage.input_tokens/output_tokensを検証する。一項目でも不正なら全体を失敗として扱う。戻り値は評価値・model・usageの明示したフィールドだけで、providerの追加フィールドやエラー本文は透過しない。
+
+## Issue #32: 同梱判定JSONの実行時調整
+
+`public/jev-questions.json` を既存buildのpublicコピーで `dist/jev-questions.json` へ配置し、ZIPの明示allowlistにも含める。JSONをTypeScript importでbundleしない。初期の7キー、全instructions/criteria/type、`model: jev-latest`、HTTP payloadは従来のまま。コメント本文・履歴は従来どおり実行時生成である。
+
+開発用unpacked拡張ではdist内JSONだけを保存すると次の新規評価へ反映する。再ビルド不要、拡張reload・ブラウザ再起動も不要（同一MV3 workerでPOST bodyの変化を自動検証）。読み込み済みの進行中評価・評価済みIDは変えず再送しない。先に停止する場合や失敗で停止した場合は修正後に明示再開する。原本変更は次回build時にコピーされ、build/check/packageはdistの直接編集を上書きする。変更を残すにはpublic原本も更新する。公開版の定義変更には同梱資産を変更した拡張更新が必要で、リモート設定配信では更新しない。
+
+backgroundは評価ごとに `runtime.getURL('jev-questions.json')` の固定URLを `cache: no-store` / credentials omit / redirect errorで読む。必要な7キーだけ、各questionのtype/instructions/criteriaだけ、`type: noul`、非空文字列のinstructions、criteriaのtrue/falseだけとその非空文字列を厳密検証する。余分なキー（model/送信先/コード等を含む）、欠落、型違い、空白だけの指示/基準、HTTP/JSON/読込障害を拒否。旧定義のfallbackや定義キャッシュはない。固定`definition`エラーをIPC/UIへ返して外部評価を停止し、失敗時のJev通信は0。生エラー・本文・キー・provider応答原文をログに出さない。
+
+追加awaitは最終送信ゲートの前に置く。閾値snapshot取得→定義読込（停止時Abort、20秒で解放）→session Retry-After再読込→キー読取→世代/record/保持期限/cooldown→同意再読取→世代/record照合・state再取得・cooldown最終確認→Jev POSTの順。JSON読込中はキー・本文snapshotを保持しない。最終ゲート後のclientはJSON読込awaitなしで固定endpointへPOSTする。Jev通信自体の既存20秒timeout、応答後キー照合、古い世代の429/529でも待機期限を保持する処理は維持する。JSON読込とJev通信はそれぞれ20秒の上限であり、全評価が合計20秒という意味ではない。
+
+外部config取得、任意URL、コード実行、新しい送信先/権限は導入しない。閾値、10秒10件、コメントstate/保持規則はこのJSONで変更しない。
 
 ## 承認済みの業務ルール
 

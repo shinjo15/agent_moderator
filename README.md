@@ -36,10 +36,18 @@ CIはNode.js 24 / Ubuntuで同じpackageコマンドを実行します。CIに�
 3. 「パッケージ化されていない拡張機能を読み込む」でこのworktreeの `dist/` を選ぶ（ソースディレクトリやzipではない）。
 4. 拡張の詳細から「拡張機能のオプション」を開く。
 5. ツールバーに拡張を固定し、アイコンからポップアップを開く。
-6. 変更後はbuildし、拡張一覧で再読み込みする。
+6. コード変更後はbuildし、拡張一覧で再読み込みする。判定JSONだけの編集は次節の手順を使う。
 
 WSLの場合はWindowsから参照できるdistディレクトリを選びます。
 自動E2Eは専用の一時プロファイルを使い、通常プロファイルを変更しません。実Chromiumでキー管理、未送信入力保持、content/external sender拒否を確認します。YouTube取得はproduction distとCDP action、非activeタブで開く同一production popupを使い、monitor/background/credential-storeを通してAPI fixtureで継続・停止・エラー・動画遷移を確認します。#5は公式取得fixture→Jev fixture→非表示登録→iframe/popoutの既存・新着非表示→一覧解除・復元、ブラウザ再起動後の保持も確認しました。別途、実YouTube DOMにproduction distを読み、観測したchannel IDのlocal seedと実monitor UI解除でdisplayの変化を確認しています。これはAPI経由の登録成功ではありません。OSのツールバークリック、通常Windows Chromeの手動操作、実キー/実API通信は未検証です。
+
+## 開発用のJev判定JSON編集
+
+原本は `public/jev-questions.json`、実行時の編集先はChromeへ読み込んだフォルダーの `dist/jev-questions.json` です。後者だけを保存すると、次の新規評価で読み込みます（再ビルド不要、拡張reload・ブラウザ再起動も不要）。読込済みの進行中評価や評価済みIDは変更・再送しません。変更前の評価を止めたい場合は先にJev判定を停止してください。停止・失敗後は明示的な再開が必要です。
+
+backgroundが同梱固定URLを毎回 `cache: no-store` で読み、7キー・`type: noul`・非空instructions・true/false criteriaと余分フィールドの不存在を検証します。失敗時はJevへ送らず固定エラーで停止し、古い定義へfallbackしません。モデル・送信先・コメントstate・閾値・連投規則はJSONから変更できません。外部設定取得・コード実行はありません。
+
+`npm run build`（check/packageも含む）はdistを削除し、public原本で上書きします。変更を残す場合は原本にも反映してbuildしてください。これはunpacked開発版の調整手順です。公開版の定義変更は同梱ファイルを更新した拡張更新が必要で、外部JSONの配信では反映しません。詳細は [Jev技術契約](docs/jev-moderation.md) を参照してください。
 
 ## キーの設定と保護範囲
 
@@ -89,13 +97,13 @@ Jev評価を使う場合はJevキーも設定し、monitorの「Jev判定を有�
 - `src/monitor.ts`: 開いている間の継続取得・本文/投稿者表示・明示開始/停止・対象配信の非表示一覧と解除。
 - `src/background.ts`: storage初期化・設定handler・monitor専用一回取得handler・キー/動画変更時の停止・非表示store/IPCの接続。
 - `src/youtube/`: 固定endpoint API client、継続core、trusted取得handler、IPC transport、動画ID境界。
-- `src/jev/`: Jev client、固定noul rubricと純粋policy、必要文脈だけの履歴、直列評価調整、IPC transport、monitor評価UI。
+- `public/jev-questions.json`: 判定instructions/criteria/typeの唯一の実行時原本。`src/jev/`: 同梱JSONの読込・検証、Jev client、純粋policy、必要文脈だけの履歴、直列評価調整、IPC transport、monitor評価UI。
 - `src/credential-store.ts`: 初期化gate、local保存とprovider別background内部読取API。
 - `src/extension-runtime.ts`: 利用するChrome runtime APIの最小型境界。
 - `src/hidden-authors/`: 配信別local store、解除revision、sender/video境界、monitor一覧・解除。
 - `src/content-ids.ts`: MAINの最小IDブリッジ。本文・キー・非表示リストは扱わない。
 - `src/content.ts`: isolated側の対象videoのIDs取得、既存/新着/再利用rendererの非表示と復元。
-- `scripts/build.mjs`: publicの静的規約ページを含むdist生成。`scripts/package.mjs`: `terms.html`を含む明示allowlistのみzip化。fixture/キー/ソースは含めない。
+- `scripts/build.mjs`: publicの静的規約ページ・判定JSONを含むdist生成。`scripts/package.mjs`: `terms.html`と`jev-questions.json`を含む明示allowlistのみzip化。fixture/キー/ソースは含めない。
 - `tests/`: manifest・配布契約。`e2e/`: 実ブラウザ検証。
 - `docs/verification/summary.md`: Issue #1の検証記録。`docs/verification/issue-2.md`: キー管理の縦RED→GREEN・実ブラウザ・最終検証。生ログはGit対象外。
 

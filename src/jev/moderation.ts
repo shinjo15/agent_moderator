@@ -66,11 +66,20 @@ export function createModeration({ client, readKey, session, now = Date.now, rea
     if (enabled && record.allowed && record.burst === 'confirmed') base.jev = 'unjudged';
     if (enabled && record.allowed && record.burst !== 'confirmed') {
       if (history.context(id)) {
+        let failureCode: JevError['code'] = 'network';
         try {
           // Capture once at new evaluation start, not observation/enqueue/response time.
           const threshold = await readThreshold();
           if (!validThreshold(threshold)) throw new Error('Invalid filter threshold');
           if (current !== generation) return { ok: false as const, error: { code: 'aborted' as const } };
+          // Local I/O precedes all send snapshots/gates. stop() cancels it as well as POST.
+          controller = new AbortController();
+          failureCode = 'definition';
+          const questions = await client.loadQuestions(controller.signal);
+          failureCode = 'network';
+          if (current !== generation) return { ok: false as const, error: { code: 'aborted' as const } };
+          const stored = (await session?.get(['jev.notBefore']))?.['jev.notBefore'];
+          if (typeof stored === 'number' && Number.isFinite(stored)) notBefore = Math.max(notBefore, stored);
           const key = await readKey();
           if (current !== generation) return { ok: false as const, error: { code: 'aborted' as const } };
           if (records.get(id) !== record) return { ok: false as const, error: { code: 'forbidden' as const } };
@@ -89,8 +98,12 @@ export function createModeration({ client, readKey, session, now = Date.now, rea
             if (records.get(id) !== record) return { ok: false as const, error: { code: 'forbidden' as const } };
             state = history.context(id);
             if (!state) return { ok: true as const, value: { ...base, jev: 'unjudged' as const } };
-            controller = new AbortController();
-            const result = await client.evaluate(state, key, controller.signal);
+            // No await between these last checks/state refresh and the actual POST.
+            if (now() < notBefore) {
+              stop();
+              return { ok: true as const, value: { ...base, jev: 'failed' as const, error: { code: 'rateLimited' as const, retryAfterMillis: notBefore - now() } } };
+            }
+            const result = await client.evaluate(state, key, controller.signal, questions);
             state = undefined;
             // Server wait constraints survive stale results, stops and worker recreation.
             if (!result.ok && result.error.retryAfterMillis !== undefined) {
@@ -110,7 +123,7 @@ export function createModeration({ client, readKey, session, now = Date.now, rea
           }
         } catch {
           if (current !== generation) return { ok: false as const, error: { code: 'aborted' as const } };
-          Object.assign(base, { jev: 'failed', error: { code: 'network' } }); stop();
+          Object.assign(base, { jev: 'failed', error: { code: failureCode } }); stop();
         }
       } else base.jev = 'unjudged';
     }
