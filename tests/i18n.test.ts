@@ -37,7 +37,7 @@ it.each(['ja', 'ja-JP', 'en-US', 'fr', 'de'])('明示Chrome UI言語%sを利用�
     expect(t('filterSelection', 'Medium', ' (same)')).toContain('Medium (same)');
     for (const key of categories) expect(t(`category_${key}`)).not.toBe('');
     for (const key of Object.keys(errorMessages)) expect(t(key === 'confirmationRequired' ? key : `youtube_${key}`)).not.toBe('');
-    for (const code of ['missingKey', 'auth', 'validation', 'rateLimited', 'overloaded', 'network', 'invalidResponse', 'aborted', 'api']) expect(t(`jev_${code}`)).not.toBe('');
+    for (const code of ['definition', 'missingKey', 'auth', 'validation', 'rateLimited', 'overloaded', 'network', 'invalidResponse', 'aborted', 'api']) expect(t(`jev_${code}`)).not.toBe('');
     expect(getMessage).toHaveBeenCalledWith('apiKey', ['Jev']);
   } finally { vi.unstubAllGlobals(); }
 });

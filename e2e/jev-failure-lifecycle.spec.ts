@@ -1,6 +1,7 @@
 import { test, expect, chromium, type Page } from '@playwright/test';
 import { build } from 'esbuild';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 
 // Deferred API fixture failures, not live Jev responses.
 declare const failureFixture: {
@@ -24,7 +25,7 @@ async function withPanel(run: (page: Page) => Promise<void>, realCore = false) {
         return new Response('{}', { status: 429, headers: { 'Retry-After': '30' } });
       }
       return new Response(JSON.stringify(apiResponse()));
-    }) }) : undefined;
+    }, async () => (${readFileSync('public/jev-questions.json', 'utf8')})) }) : undefined;
     const transport = createModerationTransport({ async sendMessage(request) {
       if (core) {
         if (request.type === 'jev.enable') return core.enable();

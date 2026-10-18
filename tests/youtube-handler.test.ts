@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { createYouTubeHandler } from '../src/youtube/background-handler';
 import { failure } from '../src/youtube/contracts';
 import { createModeration as createUnconfirmedModeration } from '../src/jev/moderation';
-import { createJevClient } from '../src/jev/client';
+import { createJevClient } from './fixtures/jev-client';
 import { apiResponse, chatPost } from './fixtures/jev';
 import { createHiddenAuthors } from '../src/hidden-authors/store';
 import { createYouTubeClient } from '../src/youtube/client';

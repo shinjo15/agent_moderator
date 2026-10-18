@@ -1,8 +1,9 @@
-import type { EvaluationState, JevClient, JevResult } from './contracts';
-import { categories, questions, type Values } from './policy';
+import type { EvaluationState, JevClient, JevResult, Questions } from './contracts';
+import { categories, type Values } from './policy';
+import { loadQuestions } from './questions';
 const object = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-export function createJevClient(fetcher: typeof fetch = fetch): JevClient {
-  return { async evaluate(state: EvaluationState, key: string, signal: AbortSignal): Promise<JevResult> {
+export function createJevClient(fetcher: typeof fetch = fetch, readQuestions = (signal: AbortSignal) => loadQuestions(signal, fetcher)): JevClient {
+  return { loadQuestions: readQuestions, async evaluate(state: EvaluationState, key: string, signal: AbortSignal, questions: Questions): Promise<JevResult> {
     if (signal.aborted) return { ok: false, error: { code: 'aborted' } };
     if (!key) return { ok: false, error: { code: 'missingKey' } };
     const controller = new AbortController();

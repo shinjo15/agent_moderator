@@ -145,6 +145,7 @@
   "authorId": { "message": "Author ID" },
   "jev_missingKey": { "message": "Save a Jev API key in settings." },
   "jev_auth": { "message": "Jev API key authentication failed. Check the key in settings and save it again." },
+  "jev_definition": { "message": "Could not load the Jev evaluation definition. Check the definition file, then press the resume button." },
   "jev_validation": { "message": "Could not request Jev evaluation. Resume later; if the issue persists, check for an extension update." },
   "jev_rateLimited": { "message": "Jev usage limit reached. Press resume later." },
   "jev_overloaded": { "message": "Jev is busy. Press resume later." },

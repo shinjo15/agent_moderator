@@ -1,5 +1,5 @@
 import { test, expect, chromium } from '@playwright/test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -22,6 +22,8 @@ for (const locale of ['ja', 'en', 'fr']) {
     test.setTimeout(60000);
     const profile = await mkdtemp(join(tmpdir(), 'moderator-i18n-'));
     const extension = resolve('dist');
+    const definitionPath = join(extension, 'jev-questions.json');
+    const originalDefinition = await readFile(definitionPath, 'utf8');
     const context = await chromium.launchPersistentContext(profile, {
       channel: 'chromium', headless: true, locale,
       env: { ...process.env, LANGUAGE: locale, LANG: `${locale}_${locale.toUpperCase()}.UTF-8` },
@@ -99,7 +101,7 @@ for (const locale of ['ja', 'en', 'fr']) {
         externalRequests++;
         if (new URL(route.request().url()).pathname.endsWith('/videos')) return route.fulfill({ json: { items: [{ id: 'abcdefghijk', liveStreamingDetails: { activeLiveChatId: 'fixture' } }] } });
         collection++;
-        return route.fulfill({ json: { nextPageToken: 'next', pollingIntervalMillis: 5000, items: collection === 1 ? [{ id: 'target', authorDetails: { channelId: 'UCaaaaaaaaaaaaaaaaaaaaaa', displayName: 'あおい / Aoi' }, snippet: { type: 'textMessageEvent', hasDisplayContent: true, displayMessage: '日本語の投稿 Keep original', publishedAt: '2026-01-01T00:00:00.000Z' } }] : [] } });
+        return route.fulfill({ json: { nextPageToken: 'next', pollingIntervalMillis: 5000, items: [{ id: `target-${collection}`, authorDetails: { channelId: 'UCaaaaaaaaaaaaaaaaaaaaaa', displayName: 'あおい / Aoi' }, snippet: { type: 'textMessageEvent', hasDisplayContent: true, displayMessage: '日本語の投稿 Keep original', publishedAt: '2026-01-01T00:00:00.000Z' } }] } });
       });
       await context.route('https://api.typesafe.ai/v1/systemone', route => {
         externalRequests++;
@@ -136,6 +138,7 @@ for (const locale of ['ja', 'en', 'fr']) {
       expect(payloads).toHaveLength(1);
       expect(Object.keys(payloads[0]).sort()).toEqual(['model', 'questions', 'state']);
       expect(payloads[0].model).toBe('jev-latest');
+      expect(payloads[0].questions).toEqual(JSON.parse(originalDefinition));
       expect(payloads[0].state).toEqual({ target: { text: '日本語の投稿 Keep original', publishedAt: '2026-01-01T00:00:00.000Z' }, history: [] });
       // Frozen main908cab0 questions: every instruction, criterion, type and category.
       expect(createHash('sha256').update(JSON.stringify(payloads[0].questions)).digest('hex')).toBe('b520a1d214bd3131d768410605704fa3ffa4b8d22ebd00d384e7efb96817745b');
@@ -152,6 +155,21 @@ for (const locale of ['ja', 'en', 'fr']) {
       await page.getByRole('button', { name: locale === 'ja' ? '全配信の非表示データを削除' : 'Delete hidden data for all streams', exact: true }).click();
       await page.getByRole('button', { name: locale === 'ja' ? '削除する' : 'Delete', exact: true }).click();
       await expect(page.getByTestId('hidden-clear-status')).toContainText(locale === 'ja' ? '削除しました' : 'Deleted');
-    } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
+      await writeFile(definitionPath, 'not json');
+      const sent = payloads.length;
+      await enable.click(); await start.click();
+      await expect(monitor.getByTestId('jev-status')).toContainText(locale === 'ja' ? '判定定義を読み込めませんでした' : 'Could not load the Jev evaluation definition', { timeout: 12000 });
+      await expect(monitor.getByTestId('jev-status')).toContainText(locale === 'ja' ? '自動では再開しません' : 'will not resume automatically');
+      await expect(enable).toBeEnabled();
+      expect(payloads).toHaveLength(sent);
+      await writeFile(definitionPath, originalDefinition);
+      await enable.click();
+      await expect.poll(() => payloads.length, { timeout: 12000 }).toBeGreaterThan(sent);
+      expect(payloads.at(-1)?.questions).toEqual(JSON.parse(originalDefinition));
+    } finally {
+      await writeFile(definitionPath, originalDefinition);
+      expect(await readFile(definitionPath, 'utf8')).toBe(originalDefinition);
+      await context.close(); await rm(profile, { recursive: true, force: true });
+    }
   });
 }

@@ -145,6 +145,7 @@
   "authorId": { "message": "投稿者ID" },
   "jev_missingKey": { "message": "設定でJev APIキーを保存してください。" },
   "jev_auth": { "message": "Jev APIキーの認証に失敗しました。設定でキーを確認し、保存し直してください。" },
+  "jev_definition": { "message": "Jevの判定定義を読み込めませんでした。定義ファイルを確認し、再開ボタンを押してください。" },
   "jev_validation": { "message": "Jevに判定を依頼できませんでした。時間をおいて再開し、問題が続く場合は拡張機能の更新を確認してください。" },
   "jev_rateLimited": { "message": "Jevの利用制限です。時間をおいて再開ボタンを押してください。" },
   "jev_overloaded": { "message": "Jevが混雑しています。時間をおいて再開ボタンを押してください。" },
