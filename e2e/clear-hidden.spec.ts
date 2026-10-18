@@ -1,5 +1,5 @@
 import { test, expect, chromium } from '@playwright/test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 declare const chrome: { tabs: { create(o: { url: string; active: boolean }): Promise<{ id: number }> }; runtime: { sendMessage(m: unknown): Promise<unknown> }; storage: { local: { get(keys: null): Promise<Record<string, unknown>>; set(v: Record<string, unknown>): Promise<void> }; session: { get(keys: null): Promise<Record<string, unknown>>; set(v: Record<string, unknown>): Promise<void> } } };
@@ -68,11 +68,19 @@ test('UI: 削除失敗応答では成功を表示せず再試行できる', asyn
   // Execute built options UI against a synthetic runtime, never user storage.
   await page.route('https://fixture.test/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><main></main>' }));
   await page.goto('https://fixture.test/');
-  await page.evaluate(() => {
-    (globalThis as unknown as { chrome: unknown }).chrome = { runtime: { id: 'fixture', getURL: (p: string) => p,
+  await page.evaluate(messages => {
+    (globalThis as unknown as { chrome: unknown }).chrome = { i18n: {
+      getUILanguage: () => 'ja',
+      getMessage: (key: string, substitutions: string[] = []) => {
+        const entry = messages[key];
+        if (!entry) return '';
+        return entry.message.replace(/\$([a-z]+)\$/gi, (_: string, name: string) => entry.placeholders![name].content)
+          .replace(/\$(\d)/g, (_: string, index: string) => substitutions[Number(index) - 1] ?? '');
+      },
+    }, runtime: { id: 'fixture', getURL: (p: string) => p,
       sendMessage: async (m: { type: string }) => m.type === 'storage.init' ? { ok: true, status: { youtube: true, jev: true } } : m.type === 'settings.getFilter' ? { ok: true, value: { threshold: 0.8 } } : { ok: false },
       onMessage: { addListener() {} }, onMessageExternal: { addListener() {} } } };
-  });
+  }, JSON.parse(await readFile('public/_locales/ja/messages.json', 'utf8')) as Record<string, { message: string; placeholders?: Record<string, { content: string }> }>);
   await page.addScriptTag({ path: resolve('dist/options.js') });
   const button = page.getByRole('button', { name: '全配信の非表示データを削除', exact: true });
   await button.click(); await page.getByRole('dialog').getByRole('button', { name: '削除する', exact: true }).click();

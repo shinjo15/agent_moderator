@@ -2,7 +2,8 @@ import type { runtime } from '../extension-runtime';
 import { DEFAULT_THRESHOLD, FILTER_PRESETS, parseThresholdInput, validThreshold } from './threshold';
 import { createNotice } from '../ui-notice';
 import { FilterSettingsFailure, validFilterFailureReason, type FilterStage } from './settings-failure';
-const names = { high: '高', medium: '中', low: '低', custom: 'カスタム' } as const;
+import { t } from '../i18n';
+const names = { high: 'strengthHigh', medium: 'strengthMedium', low: 'strengthLow', custom: 'strengthCustom' } as const;
 type Choice = keyof typeof names;
 function choiceFor(threshold: number): Choice {
   return (Object.keys(FILTER_PRESETS) as (keyof typeof FILTER_PRESETS)[]).find(key => FILTER_PRESETS[key] === threshold) ?? 'custom';
@@ -26,35 +27,35 @@ function publicThreshold(response: unknown): number {
 }
 export function createFilterSettingsPanel(main: HTMLElement, channel: Pick<typeof runtime, 'sendMessage'>) {
   const section = document.createElement('section'); section.className = 'credential-card filter-card';
-  const title = document.createElement('h2'); title.className = 'credential-title'; title.textContent = 'コメントフィルター';
+  const title = document.createElement('h2'); title.className = 'credential-title'; title.textContent = t('filterTitle');
   const help = document.createElement('p'); help.className = 'credential-help';
-  help.textContent = '高ほど非表示にしやすく、低ほど慎重に判定します。7項目のいずれかのスコアが判定の基準値以上なら悪質と判定します。';
+  help.textContent = t('filterHelp');
   const application = createNotice('credential-help', [], [
-    '保存後に開始する判定から反映します。判定中・過去の結果や既存の非表示は変更しません。',
-    '設定の変更だけでコメントを再送したり、追加のJev通信をしたりすることはありません。',
+    t('filterApplies'),
+    t('filterNoResend'),
   ]);
-  const label = document.createElement('label'); label.className = 'credential-label'; label.htmlFor = 'filter-strength'; label.textContent = 'フィルターの強さ';
+  const label = document.createElement('label'); label.className = 'credential-label'; label.htmlFor = 'filter-strength'; label.textContent = t('filterStrength');
   const select = document.createElement('select'); select.id = label.htmlFor; select.className = 'credential-input';
   for (const choice of Object.keys(names) as Choice[]) {
     const option = document.createElement('option'); option.value = choice;
-    option.textContent = choice === 'custom' ? 'カスタム（詳細設定）' : `${names[choice]}（判定の基準値 ${FILTER_PRESETS[choice]}）`;
+    option.textContent = choice === 'custom' ? t('customOption') : t('presetOption', t(names[choice]), FILTER_PRESETS[choice]);
     select.append(option);
   }
   select.value = 'medium';
   const details = document.createElement('details'); details.className = 'filter-details';
-  const summary = document.createElement('summary'); summary.textContent = '詳細設定';
-  const customLabel = document.createElement('label'); customLabel.className = 'credential-label'; customLabel.htmlFor = 'filter-threshold'; customLabel.textContent = '判定の基準値';
+  const summary = document.createElement('summary'); summary.textContent = t('advancedSettings');
+  const customLabel = document.createElement('label'); customLabel.className = 'credential-label'; customLabel.htmlFor = 'filter-threshold'; customLabel.textContent = t('threshold');
   const input = document.createElement('input'); input.id = customLabel.htmlFor; input.className = 'credential-input';
   input.type = 'number'; input.min = '0'; input.max = '1'; input.step = 'any'; input.required = true; input.value = String(DEFAULT_THRESHOLD);
-  const range = createNotice('credential-help', ['0以上1以下の数値を入力してください。小さいほど非表示にしやすくなります。'], [
-    '0では、判定済みのすべてのコメントが悪質になります。1では、スコアが1の項目だけが該当します。',
-    '同じ投稿者による10秒以内10件以上の連投は、この値に関係なく非表示の対象です。判定に使う同じ投稿者の直近60秒・最大20件のコメントも変わりません。',
+  const range = createNotice('credential-help', [t('thresholdRange')], [
+    t('thresholdExtremes'),
+    t('thresholdBurst'),
   ]); range.id = 'filter-threshold-help';
   input.setAttribute('aria-describedby', range.id);
   details.append(summary, customLabel, input, range);
   const preview = document.createElement('p'); preview.className = 'credential-help'; preview.dataset.testid = 'filter-selection';
-  const status = document.createElement('p'); status.dataset.testid = 'filter-status'; status.setAttribute('aria-live', 'polite'); status.textContent = 'フィルター設定を確認中です。';
-  const save = document.createElement('button'); save.type = 'button'; save.className = 'credential-save'; save.textContent = 'フィルター設定を保存';
+  const status = document.createElement('p'); status.dataset.testid = 'filter-status'; status.setAttribute('aria-live', 'polite'); status.textContent = t('filterChecking');
+  const save = document.createElement('button'); save.type = 'button'; save.className = 'credential-save'; save.textContent = t('saveFilter');
   section.append(title, help, label, select, details, preview, status, save, application); main.append(section);
   let busy = false;
   let saved: number | undefined;
@@ -68,23 +69,23 @@ export function createFilterSettingsPanel(main: HTMLElement, channel: Pick<typeo
     const code = error instanceof FilterSettingsFailure ? error.code : 'inconsistentResponse';
     const shape = error instanceof FilterSettingsFailure ? error.shape : undefined;
     const flags = shape ? ` shape:${[shape.object, shape.okTrue, shape.okFalse, shape.valueObject, shape.thresholdNumber, shape.thresholdValid].map(flag => flag ? '1' : '0').join('')}` : '';
-    const next = stage === 'initialGet' ? '画面を開き直すか、保存し直してください。' : 'もう一度保存してください。';
-    status.textContent = `フィルター設定の処理に失敗しました。保存状態を確認できません。${next} 確認コード: filter-${stage}-${code}${flags}`;
+    const next = t(stage === 'initialGet' ? 'filterRetryInitial' : 'filterRetrySave');
+    status.textContent = t('filterFailure', next, `filter-${stage}-${code}${flags}`);
   }
   function selected() {
     const choice = select.value as Choice;
     return choice === 'custom' ? parseThresholdInput(input.value) : FILTER_PRESETS[choice];
   }
-  function describe(threshold: number) { return `${names[choiceFor(threshold)]} / 判定の基準値 ${threshold}`; }
+  function describe(threshold: number) { return t('filterDescribe', t(names[choiceFor(threshold)]), threshold); }
   function previewSelection() {
     const threshold = selected();
-    preview.textContent = threshold === undefined ? '0以上1以下の数値を入力してください。'
-      : `選択中：${describe(threshold)}${saved === threshold ? '（現在の設定と同じ）' : '（未保存：保存ボタンで反映）'}`;
+    preview.textContent = threshold === undefined ? t('thresholdRangeShort')
+      : t('filterSelection', describe(threshold), t(saved === threshold ? 'filterSame' : 'filterUnsaved'));
   }
   function lock(value: boolean) { busy = value; select.disabled = value; input.disabled = value; save.disabled = value; }
   function render(threshold: number) {
     saved = threshold; select.value = choiceFor(threshold); input.value = String(threshold);
-    details.open = select.value === 'custom'; status.textContent = `現在の設定：${describe(threshold)}`; previewSelection();
+    details.open = select.value === 'custom'; status.textContent = t('filterCurrent', describe(threshold)); previewSelection();
   }
   select.addEventListener('change', () => {
     if (select.value === 'custom') details.open = true;
@@ -96,9 +97,9 @@ export function createFilterSettingsPanel(main: HTMLElement, channel: Pick<typeo
     if (busy) return;
     const threshold = selected();
     if (!validThreshold(threshold) || (select.value === 'custom' && !input.validity.valid)) {
-      status.textContent = '判定の基準値は0以上1以下の数値を入力してください。保存していません。'; return;
+      status.textContent = t('thresholdInvalid'); return;
     }
-    lock(true); status.textContent = 'フィルター設定を保存・確認中です。';
+    lock(true); status.textContent = t('filterSaving');
     void (async () => {
       let stage: FilterStage = 'save';
       try {
@@ -108,7 +109,7 @@ export function createFilterSettingsPanel(main: HTMLElement, channel: Pick<typeo
         const readback = await requestThreshold({ type: 'settings.getFilter' });
         if (readback !== threshold) throw new FilterSettingsFailure('valueMismatch');
         render(threshold);
-        status.textContent = `保存しました：${describe(threshold)}`;
+        status.textContent = t('filterSaved', describe(threshold));
       } catch (error) { failure(stage, error); }
       finally { lock(false); }
     })();

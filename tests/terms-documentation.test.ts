@@ -15,7 +15,7 @@ it('案の同意導線と公開準備の記録を関連文書に整合させる'
   for (const token of ['../terms.md', 'MetaMask', 'VERSION', 'terms.html', 'インストール前', '裁判', '現ストア']) expect(audit).toContain(token);
 });
 
-it('一般向け規約案とスクリプト不要の同梱HTMLは同じ本文・リンクを持つ', () => {
+it('一般向け規約案と同梱HTMLの日本語本文・リンクは同一で翻訳scriptのみ許可する', () => {
   expect(existsSync('docs/terms.md')).toBe(true);
   expect(existsSync('public/terms.html')).toBe(true);
   const markdown = readFileSync('docs/terms.md', 'utf8');
@@ -28,7 +28,8 @@ it('一般向け規約案とスクリプト不要の同梱HTMLは同じ本文・
   expect(htmlLinks).toEqual(markdownLinks.map(href => href.startsWith('http') || href.startsWith('mailto:') ? href : `https://github.com/shinjo15/agent_moderator/blob/main/docs/${href}`));
   expect(html).toContain('lang="ja"');
   expect(html).toContain('charset="UTF-8"');
-  expect(html).not.toMatch(/<script|\son\w+=|javascript:/i);
+  expect(html.match(/<script[^>]*>[\s\S]*?<\/script>/g)).toEqual(['<script src="terms.js" defer></script>']);
+  expect(html).not.toMatch(/\son\w+=|javascript:/i);
   for (const anchor of main.matchAll(/<a\b[^>]*>/g)) {
     expect(anchor[0]).toContain('target="_blank"');
     expect(anchor[0]).toContain('rel="noopener noreferrer"');

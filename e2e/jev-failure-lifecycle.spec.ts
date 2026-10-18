@@ -1,5 +1,6 @@
 import { test, expect, chromium, type Page } from '@playwright/test';
 import { build } from 'esbuild';
+import { readFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 
 // Deferred API fixture failures, not live Jev responses.
@@ -51,6 +52,15 @@ async function withPanel(run: (page: Page) => Promise<void>, realCore = false) {
     const page = await browser.newPage();
     await page.clock.install();
     await page.goto('about:blank');
+    // Isolated panel fixture, not an extension page: explicitly supply Japanese
+    // Chrome i18n instead of adding a Japanese fallback to production code.
+    await page.evaluate(messages => {
+      Object.assign(globalThis, { chrome: { i18n: {
+        getUILanguage: () => 'ja',
+        getMessage: (key: string, substitutions: string[] = []) =>
+          messages[key]?.message.replace(/\$(\d)/g, (_: string, index: string) => substitutions[Number(index) - 1] ?? '') ?? '',
+      } } });
+    }, JSON.parse(await readFile('public/_locales/ja/messages.json', 'utf8')) as Record<string, { message: string }>);
     await page.addScriptTag({ content: bundle.outputFiles[0].text });
     await run(page);
   } finally { await browser.close(); }
