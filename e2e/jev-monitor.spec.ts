@@ -1,5 +1,5 @@
 import { test, expect, chromium } from '@playwright/test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { apiResponse, keys } from '../tests/fixtures/jev';
@@ -10,6 +10,11 @@ test('production MV3: 既取得fixture→background→Jev全項目fixture→表�
   test.setTimeout(70000);
   const profile = await mkdtemp(join(tmpdir(), 'agent-moderator-jev-'));
   const extension = resolve('dist');
+  const definitionPath = join(extension, 'jev-questions.json');
+  const originalDefinition = await readFile(definitionPath, 'utf8');
+  const originalQuestions = JSON.parse(originalDefinition);
+  const editedQuestions = structuredClone(originalQuestions);
+  editedQuestions.attack.instructions += ' ローカルJSON変更の反映確認。';
   const context = await chromium.launchPersistentContext(profile, { channel: 'chromium', headless: true,
     args: ['--enable-unsafe-extension-debugging', `--disable-extensions-except=${extension}`, `--load-extension=${extension}`] });
   try {
@@ -39,6 +44,9 @@ test('production MV3: 既取得fixture→background→Jev全項目fixture→表�
       expect(route.request().method()).toBe('POST');
       expect(['Bearer synthetic-jev', 'Bearer synthetic-jev-replacement'].includes(route.request().headers().authorization)).toBe(true);
       const body = route.request().postDataJSON(); requests.push(body);
+      // One build before this test. Change ONLY dist JSON while the same worker stays alive.
+      expect(body).toEqual({ model: 'jev-latest', state: body.state, questions: requests.length === 1 ? originalQuestions : editedQuestions });
+      if (requests.length === 1) await writeFile(definitionPath, JSON.stringify(editedQuestions));
       expect(body.model).toBe('jev-latest'); expect(Object.keys(body.questions)).toEqual([...keys]);
       for (const question of Object.values(body.questions) as { type: string; instructions: string }[]) { expect(question.type).toBe('noul'); expect(question.instructions).toContain('未信頼'); }
       expect(JSON.stringify(body.state)).not.toMatch(/authorChannelId|"id"|synthetic|別の投稿者/);
@@ -87,9 +95,19 @@ test('production MV3: 既取得fixture→background→Jev全項目fixture→表�
     const unbound = await context.newPage(); await unbound.goto(`chrome-extension://${id}/monitor.html`);
     expect(await unbound.evaluate(() => chrome.runtime.sendMessage({ type: 'jev.enable' }))).toMatchObject({ ok: false });
     await unbound.close();
+    // Fail closed through the real MV3 background too, never fall back to the last valid JSON.
+    const invalidDefinitions = ['not json', JSON.stringify({ ...editedQuestions, endpoint: 'https://invalid.example' }), undefined];
+    for (const [index, invalid] of invalidDefinitions.entries()) {
+      if (invalid === undefined) await rm(definitionPath); else await writeFile(definitionPath, invalid);
+      if (index > 0) await monitor.getByRole('button', { name: 'Jev判定を有効化・再開' }).click();
+      await expect(monitor.getByTestId('jev-status')).toContainText('判定定義を読み込めませんでした', { timeout: 12000 });
+      expect(requests).toHaveLength(2);
+    }
+    await writeFile(definitionPath, JSON.stringify(editedQuestions));
     failing = true;
+    await monitor.getByRole('button', { name: 'Jev判定を有効化・再開' }).click();
     await expect(monitor.locator('#messages li').filter({ hasText: '批判的な感想' }).first()).toContainText('判定失敗', { timeout: 12000 });
-    await expect(monitor.getByTestId('jev-status')).toContainText('停止');
+    await expect(monitor.getByTestId('jev-status')).toContainText('認証に失敗しました', { timeout: 12000 });
     const count = requests.length;
     await monitor.getByRole('button', { name: '取得を停止', exact: true }).click();
     await monitor.waitForTimeout(5500); expect(requests).toHaveLength(count);
@@ -112,5 +130,9 @@ test('production MV3: 既取得fixture→background→Jev全項目fixture→表�
     await expect(monitor.locator('body')).not.toContainText('synthetic-jev');
     await expect(monitor.locator('body')).not.toContainText('private-provider-body');
     expect(logs.join('\n')).not.toMatch(/synthetic|private-provider/);
-  } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
+  } finally {
+    await writeFile(definitionPath, originalDefinition);
+    expect(await readFile(definitionPath, 'utf8')).toBe(originalDefinition);
+    await context.close(); await rm(profile, { recursive: true, force: true });
+  }
 });

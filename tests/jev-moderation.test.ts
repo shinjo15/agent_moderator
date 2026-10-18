@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { createModeration as createUnconfirmedModeration } from '../src/jev/moderation';
-import { createJevClient } from '../src/jev/client';
+import { createJevClient, questions } from './fixtures/jev-client';
 import { apiResponse, chatPost } from './fixtures/jev';
 // Existing core scenarios represent an explicitly confirmed fixture user.
 const createModeration = (deps: Parameters<typeof createUnconfirmedModeration>[0]) =>
@@ -171,7 +171,7 @@ it('処理中が長くてもidleで未評価queueを解放し遅延結果で新�
   vi.useFakeTimers();
   try {
     let finish!: (value: Awaited<ReturnType<ReturnType<typeof createJevClient>['evaluate']>>) => void;
-    const client = { evaluate: vi.fn(() => new Promise<Awaited<ReturnType<ReturnType<typeof createJevClient>['evaluate']>>>(resolve => { finish = resolve; })) };
+    const client = { loadQuestions: async () => questions, evaluate: vi.fn(() => new Promise<Awaited<ReturnType<ReturnType<typeof createJevClient>['evaluate']>>>(resolve => { finish = resolve; })) };
     const moderation = createModeration({ client, readKey: async () => 'synthetic' });
     await moderation.enable(); moderation.observe([chatPost('active'), chatPost('waiting', 1)]);
     const active = moderation.evaluate('active'); const waiting = moderation.evaluate('waiting');

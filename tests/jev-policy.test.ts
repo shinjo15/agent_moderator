@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
-import { categories, decide, questions, type Values } from '../src/jev/policy';
-import { createJevClient } from '../src/jev/client';
+import { categories, decide, type Values } from '../src/jev/policy';
+import { createJevClient, questions } from './fixtures/jev-client';
 import { createHistory } from '../src/jev/history';
 import { apiResponse, chatPost, japaneseExamples, realisticJapaneseExamples } from './fixtures/jev';
 it.each([0, 0.65, 0.8, 0.9, 1])('設定閾値%sで7項目のraw値をinclusive比較する', threshold => {
