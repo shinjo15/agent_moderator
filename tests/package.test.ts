@@ -9,7 +9,10 @@ it('配布zipにはdistの検証済みファイルだけを含める', () => {
   const result = spawnSync(process.execPath, ['scripts/package.mjs'], { encoding: 'utf8' });
   expect(result.status, result.stderr).toBe(0);
   const archive = unzipSync(readFileSync('artifacts/agent-moderator.zip'));
-  expect(Object.keys(archive).sort()).toEqual(readdirSync('dist').sort());
+  const files = readdirSync('dist', { recursive: true, withFileTypes: true }).filter(entry => entry.isFile())
+    .map(entry => `${entry.parentPath}/${entry.name}`.replace(/^dist\//, ''));
+  expect(Object.keys(archive).sort()).toEqual(files.sort());
+  expect(Object.keys(archive)).toEqual(expect.arrayContaining(['terms.js', '_locales/en/messages.json', '_locales/ja/messages.json']));
   for (const [name, bytes] of Object.entries(archive)) {
     expect(Buffer.from(bytes)).toEqual(readFileSync(`dist/${name}`));
   }

@@ -7,28 +7,30 @@ import { createHiddenAuthorPanel } from './hidden-authors/monitor';
 import { MAX_VISIBLE_MESSAGES } from './retention';
 import { createNotice } from './ui-notice';
 import { createAuthorLabel } from './author-label';
-import { confirmationRequired } from './confirmation';
+import { t, initializePage } from './i18n';
+
+initializePage('monitorTitle');
 
 const main = document.querySelector('main')!;
 const heading = document.createElement('h1');
-heading.textContent = 'YouTubeライブチャット取得';
+heading.textContent = t('monitorTitle');
 const notice = createNotice('monitor-notice', [
-  'この画面を開いている間は、YouTubeの視聴中も取得を続けます。別のタブやウィンドウの裏にあると、取得が遅れる場合があります。',
+  t('monitorContinue'),
 ], [
-  'この画面を閉じると取得・判定は停止します。登録済みの非表示は続きます。解除は上の一覧から行ってください。',
-  'ライブ配信中のチャットのみ対象です。終了済み配信のチャット再生には対応していません。初回に過去のコメントをすべて取得できるとは限りません。',
+  t('monitorClose'),
+  t('monitorLiveOnly'),
 ]);
 const target = document.createElement('p');
 const status = document.createElement('p');
 status.setAttribute('role', 'status');
 const start = document.createElement('button');
 start.type = 'button';
-start.textContent = '取得を開始'; start.disabled = true;
+start.textContent = t('startCollection'); start.disabled = true;
 const stop = document.createElement('button');
 stop.type = 'button';
-stop.textContent = '取得を停止'; stop.disabled = true;
+stop.textContent = t('stopCollection'); stop.disabled = true;
 const settings = document.createElement('a');
-settings.href = 'options.html'; settings.target = '_blank'; settings.textContent = '設定を開く';
+settings.href = 'options.html'; settings.target = '_blank'; settings.textContent = t('openSettings');
 const messages = document.createElement('ol');
 messages.id = 'messages';
 const controls = document.createElement('section');
@@ -40,13 +42,13 @@ controls.append(target, actions, status);
 main.append(heading, controls);
 const jev = createJevPanel(controls, createModerationTransport(runtime));
 const chatHeading = document.createElement('h2');
-chatHeading.textContent = '取得コメント';
+chatHeading.textContent = t('collectedComments');
 chatHeading.id = 'chat-heading';
 const scoreNote = createNotice('monitor-note', [
-  `表示は直近${MAX_VISIBLE_MESSAGES}件です。投稿者の照合は投稿者IDで行います。`,
-  '判定スコアは7項目の最高値です（小数点以下2桁）。正確さを保証する数値ではありません。',
-  '「項目別スコア」には丸め前の数値を表示し、判定にもこの数値を使います。',
-  '処理が追いつかない場合や古いコメントは、未判定のまま処理を終えることがあります。未判定は「該当なし」ではありません。',
+  t('visibleLimit', MAX_VISIBLE_MESSAGES),
+  t('scoreNote'),
+  t('scoreRawNote'),
+  t('unjudgedNote'),
 ]);
 const chat = document.createElement('div');
 chat.className = 'chat-scroll';
@@ -55,7 +57,7 @@ chat.setAttribute('aria-labelledby', chatHeading.id);
 chat.tabIndex = 0;
 const empty = document.createElement('p');
 empty.className = 'empty-list';
-empty.textContent = 'コメントはまだありません。';
+empty.textContent = t('noComments');
 chat.append(empty, messages);
 const atBottom = () => chat.scrollHeight - chat.clientHeight - chat.scrollTop <= 2;
 let followLatest = true;
@@ -97,7 +99,12 @@ const monitor = createChatMonitor({ transport: createRuntimeTransport(),
   onState: state => {
     start.disabled = state.status === 'running' || !available || !validTarget;
     stop.disabled = state.status !== 'running';
-    status.textContent = state.error?.message ?? ({ running: 'ライブチャットを取得中です。', stopped: '取得を停止しました。', ended: 'ライブ配信またはチャットは終了しました。', error: '取得に失敗しました。' })[state.status];
+    // This local retention failure shares unavailable with provider outages. Match only
+    // the known fixed context; never render arbitrary transport error.message text.
+    const overflow = state.error?.code === 'unavailable' && state.error.message === 'コメントが多く、取得を停止しました。未処理のコメントは未判定です。60秒後に「取得を開始」を押してください。';
+    status.textContent = overflow ? t('collectionOverflow') : state.error
+      ? t(state.error.code === 'confirmationRequired' ? 'confirmationRequired' : `youtube_${state.error.code}`)
+      : t(`collection_${state.status}`);
   },
 });
 start.addEventListener('click', () => monitor.start());
@@ -108,21 +115,21 @@ runtime.onMessage.addListener((message, sender) => {
   if (sender.id !== runtime.id || (sender.url !== undefined && sender.url !== runtime.getURL('background.js'))
     || typeof message !== 'object' || message === null || !('type' in message)) return false;
   if (message.type === 'hidden.clearing' || message.type === 'hidden.refresh') {
-    jev.stop('非表示データの削除のためJev判定を停止しました。再開は明示的に操作してください。', true);
+    jev.stop(t('clearJevStop'), true);
     monitor.credentialsChanged(available);
     hidden.refresh();
-    status.textContent = '非表示データの削除のため取得・判定を停止しました。再開するには「取得を開始」を押してください。';
+    status.textContent = t('clearCollectionStop');
   }
   if (message.type === 'confirmation.changed') {
-    monitor.stop(); jev.stop(confirmationRequired, true);
-    status.textContent = '同意状態が変更されたため停止しました。設定で同意状態を確認し、明示的に再開してください。';
+    monitor.stop(); jev.stop(t('confirmationRequired'), true);
+    status.textContent = t('agreementChanged');
   }
   if (message.type === 'youtube.credentialsChanged' && 'available' in message && typeof message.available === 'boolean') {
-    jev.stop('YouTubeキー変更のためJev判定も停止しました。', true);
+    jev.stop(t('youtubeKeyJevStop'), true);
     initializationGeneration++;
     available = message.available;
     monitor.credentialsChanged(available);
-    status.textContent = available ? 'YouTube APIキーが変更されたため停止しました。「取得を開始」で再開してください。' : 'YouTube APIキーが未設定のため停止しました。設定画面で保存してください。';
+    status.textContent = t(available ? 'youtubeKeyChanged' : 'youtubeKeyMissingStop');
   }
   if (message.type === 'youtube.targetChanged') {
     hidden.setVideo(undefined);
@@ -131,9 +138,9 @@ runtime.onMessage.addListener((message, sender) => {
     validTarget = false;
     monitor.setVideo(undefined);
     start.disabled = true;
-    target.textContent = '視聴タブが変更または閉じられました。YouTube視聴タブの拡張ポップアップから選び直してください。';
+    target.textContent = t('targetChanged');
   }
-  if (message.type === 'jev.credentialsChanged') jev.stop('Jev APIキーの変更・削除のため判定を停止しました。設定を確認し、「Jev判定を有効化・再開」を押してください。');
+  if (message.type === 'jev.credentialsChanged') jev.stop(t('jevKeyChanged'));
   return false;
 });
 void (async () => {
@@ -147,14 +154,14 @@ void (async () => {
       || !('credentialsAvailable' in response.value) || typeof response.value.credentialsAvailable !== 'boolean') throw new Error();
     validTarget = true;
     available = response.value.credentialsAvailable;
-    target.textContent = `対象動画: ${response.value.videoId}`;
+    target.textContent = t('targetVideo', response.value.videoId);
     hidden.setVideo(response.value.videoId);
     monitor.setVideo(response.value.videoId);
     monitor.credentialsChanged(available);
     jev.setTarget(true);
-    status.textContent = available ? '「取得を開始」を押してください。' : 'YouTube APIキーが未設定です。設定画面で保存してください。';
+    status.textContent = t(available ? 'readyCollection' : 'youtubeKeyMissing');
   } catch {
     if (generation !== initializationGeneration) return;
-    status.textContent = 'YouTube視聴タブの拡張ポップアップから対象動画を選択してください。';
+    status.textContent = t('selectVideo');
   }
 })();

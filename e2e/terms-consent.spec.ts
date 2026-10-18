@@ -42,7 +42,9 @@ test('既存panel内で開発版の案へ明示同意し、同梱規約は未マ
     await expect(terms.locator('main')).toContainText('施行日：未定');
     await expect(terms.locator('main')).toContainText('正式施行ではありません');
     await expect(terms.getByRole('link', { name: 'YouTube利用規約', exact: true })).toHaveAttribute('href', 'https://www.youtube.com/t/terms');
-    await expect(terms.locator('script')).toHaveCount(0);
+    await expect(terms.locator('script')).toHaveCount(1);
+    await expect(terms.locator('script')).toHaveAttribute('src', 'terms.js');
+    await expect(terms.locator('script')).toHaveText('');
     expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.get' })))
       .toEqual({ ok: true, value: { confirmed: false, version: 2 } });
   } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }

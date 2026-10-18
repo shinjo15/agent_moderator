@@ -1,31 +1,32 @@
 import type { runtime } from './extension-runtime';
-import { CONFIRMATION_VERSION, confirmationRequired } from './confirmation';
+import { CONFIRMATION_VERSION } from './confirmation';
+import { t } from './i18n';
 
 export function createConfirmationPanel(main: HTMLElement, channel: Pick<typeof runtime, 'sendMessage' | 'onMessage' | 'id' | 'getURL'>) {
   const section = document.createElement('section'); section.className = 'credential-card';
-  const heading = document.createElement('h2'); heading.textContent = '利用前の確認';
+  const heading = document.createElement('h2'); heading.textContent = t('confirmationTitle');
   const links = document.createElement('p');
   for (const [name, href] of [
-    ['利用規約（案）', channel.getURL('terms.html')],
-    ['プライバシーポリシー（案）', 'https://github.com/shinjo15/agent_moderator/blob/main/docs/privacy.md'],
-    ['YouTube利用規約', 'https://www.youtube.com/t/terms'],
-    ['Googleプライバシーポリシー', 'https://policies.google.com/privacy'],
+    [t('termsLink'), channel.getURL('terms.html')],
+    [t('privacyLink'), 'https://github.com/shinjo15/agent_moderator/blob/main/docs/privacy.md'],
+    [t('youtubeTerms'), 'https://www.youtube.com/t/terms'],
+    [t('googlePrivacy'), 'https://policies.google.com/privacy'],
   ]) {
     const link = document.createElement('a'); link.textContent = name; link.href = href; link.target = '_blank'; link.rel = 'noopener noreferrer';
     links.append(link, document.createElement('br'));
   }
   const explanation = document.createElement('p');
-  explanation.textContent = '本拡張はYouTube API Servicesを使用し、利用者はYouTube利用規約に拘束されます。利用規約案・プライバシーポリシー案とデータの扱いに同意してから、取得・判定を開始してください。キーは同意前でも保存できます。通常のYouTubeページの閲覧は対象外です。';
+  explanation.textContent = t('confirmationExplanation');
   const jev = document.createElement('p'); jev.className = 'sending-disclosure';
-  jev.textContent = 'Jev判定の送信先はTypeSafe AIです。悪質性の判定のため、対象コメントの本文と投稿時刻、および同じ投稿者の60秒以内の取得済みコメント（対象を含め最大20件）を送信します。本文には個人情報が含まれ得ます。YouTube APIの利用枠とJevの利用料金は利用者負担です。同意後もJev判定の明示有効化が必要です。';
+  jev.textContent = t('sendingDisclosure');
   const limits = document.createElement('p'); limits.className = 'credential-help';
-  limits.textContent = '開発版での確認・同意であり、利用規約・プライバシーポリシーは案（施行日未定）です。正式施行・一般配布や提供元の承認を意味しません。この同意は投稿者本人の同意ではありません。第三者の投稿の送信条件と提供元の規約適合は未確認です。';
+  limits.textContent = t('draftLimits');
   const persistence = document.createElement('p'); persistence.className = 'credential-help';
-  persistence.textContent = '同意した説明の版のみを、このChromeプロファイルの端末内に保存します。他の端末へ同期せず、再起動後も保持します。説明の版が変わった場合、保存情報が失われた場合や読み取れない場合は再同意が必要です。未同意の間は外部送信しません。保存エラー時は取得・判定を再開せず再同意してください。保存領域の故障時の再起動後の状態は保証できません。';
+  persistence.textContent = t('agreementPersistence');
   const label = document.createElement('label');
   const checkbox = document.createElement('input'); checkbox.type = 'checkbox';
-  label.append(checkbox, '利用規約（案）とプライバシーポリシー（案）に同意し、データ送信・費用の説明を確認しました');
-  const button = document.createElement('button'); button.type = 'button'; button.className = 'credential-save'; button.textContent = '同意を保存'; button.disabled = true;
+  label.append(checkbox, t('agreementCheckbox'));
+  const button = document.createElement('button'); button.type = 'button'; button.className = 'credential-save'; button.textContent = t('saveAgreement'); button.disabled = true;
   const status = document.createElement('p'); status.dataset.testid = 'confirmation-status'; status.setAttribute('aria-live', 'polite');
   section.append(heading, links, explanation, jev, limits, persistence, label, document.createElement('br'), button, status); main.append(section);
   let busy = true; let generation = 0; let refreshPending = false;
@@ -39,11 +40,11 @@ export function createConfirmationPanel(main: HTMLElement, channel: Pick<typeof 
         || typeof response.value !== 'object' || response.value === null || !('version' in response.value) || response.value.version !== CONFIRMATION_VERSION
         || !('confirmed' in response.value) || typeof response.value.confirmed !== 'boolean' || (save && !response.value.confirmed)) throw new Error();
       checkbox.checked = response.value.confirmed;
-      status.textContent = response.value.confirmed ? `同意済み（説明の版 ${CONFIRMATION_VERSION}）。取得・Jev判定は自動開始しません。` : `未同意：${confirmationRequired}`;
+      status.textContent = response.value.confirmed ? t('agreed', CONFIRMATION_VERSION) : t('notAgreed', t('confirmationRequired'));
     } catch {
       if (current !== generation) return;
       checkbox.checked = false;
-      status.textContent = '同意状態を保存・取得できませんでした。外部送信せず、もう一度同意してください。';
+      status.textContent = t('agreementFailure');
     } finally {
       if (current === generation) {
         busy = false; button.disabled = !checkbox.checked;
