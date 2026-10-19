@@ -33,6 +33,7 @@
   "saveKey": { "message": "$1キーを保存" },
   "deleteKey": { "message": "$1キーを削除" },
   "confirmationTitle": { "message": "利用前の確認" },
+  "agreementDetails": { "message": "同意内容を確認" },
   "termsLink": { "message": "利用規約（案）" },
   "privacyLink": { "message": "プライバシーポリシー（案）" },
   "youtubeTerms": { "message": "YouTube利用規約" },
