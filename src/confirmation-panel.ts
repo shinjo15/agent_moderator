@@ -5,6 +5,8 @@ import { t } from './i18n';
 export function createConfirmationPanel(main: HTMLElement, channel: Pick<typeof runtime, 'sendMessage' | 'onMessage' | 'id' | 'getURL'>) {
   const section = document.createElement('section'); section.className = 'credential-card';
   const heading = document.createElement('h2'); heading.textContent = t('confirmationTitle');
+  const details = document.createElement('details'); details.open = true;
+  const summary = document.createElement('summary'); summary.textContent = t('agreementDetails'); summary.hidden = true;
   const links = document.createElement('p');
   for (const [name, href] of [
     [t('termsLink'), channel.getURL('terms.html')],
@@ -28,8 +30,17 @@ export function createConfirmationPanel(main: HTMLElement, channel: Pick<typeof 
   label.append(checkbox, t('agreementCheckbox'));
   const button = document.createElement('button'); button.type = 'button'; button.className = 'credential-save'; button.textContent = t('saveAgreement'); button.disabled = true;
   const status = document.createElement('p'); status.dataset.testid = 'confirmation-status'; status.setAttribute('aria-live', 'polite');
-  section.append(heading, links, explanation, jev, limits, persistence, label, document.createElement('br'), button, status); main.append(section);
+  const controls = document.createElement('div'); controls.append(label, document.createElement('br'), button);
+  details.append(summary, explanation, jev, limits, persistence, controls);
+  section.append(heading, links, details, status); main.append(section);
   let busy = true; let generation = 0; let refreshPending = false;
+  let agreed = false;
+  function displayAgreement(confirmed: boolean) {
+    if (confirmed !== agreed) details.open = !confirmed;
+    agreed = confirmed;
+    summary.hidden = !confirmed;
+    controls.hidden = confirmed;
+  }
   checkbox.addEventListener('change', () => { button.disabled = busy || !checkbox.checked; });
   async function request(save = false) {
     const current = ++generation; busy = true; button.disabled = true;
@@ -40,10 +51,12 @@ export function createConfirmationPanel(main: HTMLElement, channel: Pick<typeof 
         || typeof response.value !== 'object' || response.value === null || !('version' in response.value) || response.value.version !== CONFIRMATION_VERSION
         || !('confirmed' in response.value) || typeof response.value.confirmed !== 'boolean' || (save && !response.value.confirmed)) throw new Error();
       checkbox.checked = response.value.confirmed;
+      displayAgreement(response.value.confirmed);
       status.textContent = response.value.confirmed ? t('agreed', CONFIRMATION_VERSION) : t('notAgreed', t('confirmationRequired'));
     } catch {
       if (current !== generation) return;
       checkbox.checked = false;
+      displayAgreement(false);
       status.textContent = t('agreementFailure');
     } finally {
       if (current === generation) {

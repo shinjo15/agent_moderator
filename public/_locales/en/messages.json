@@ -33,6 +33,7 @@
   "saveKey": { "message": "Save $1 key" },
   "deleteKey": { "message": "Delete $1 key" },
   "confirmationTitle": { "message": "Before use" },
+  "agreementDetails": { "message": "Review agreement details" },
   "termsLink": { "message": "Terms of use (draft)" },
   "privacyLink": { "message": "Privacy policy (draft, Japanese)" },
   "youtubeTerms": { "message": "YouTube Terms of Service" },
