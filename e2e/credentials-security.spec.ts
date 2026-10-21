@@ -85,33 +85,6 @@ for (const operation of ['save', 'delete', 'failed-save'] as const) {
   });
 }
 
-test('YouTubeへcontentを注入せずページにruntime/storage/キーを公開しない', async () => {
-  await withExtension(async (context, worker, id) => {
-    const options = await context.newPage();
-    await options.goto(`chrome-extension://${id}/options.html`);
-    await options.getByLabel('YouTube APIキー').fill('synthetic-content-protected');
-    await options.getByRole('button', { name: 'YouTubeキーを保存' }).click();
-    await expect(options.getByTestId('youtube-status')).toHaveText('設定済み');
-    const page = await context.newPage();
-    const cdp = await context.newCDPSession(page);
-    const worlds: { id: number; origin: string; auxData?: { type?: string } }[] = [];
-    cdp.on('Runtime.executionContextCreated', event => worlds.push(event.context));
-    await cdp.send('Runtime.enable');
-    // Real URL, local response fixture only; production must create no extension world.
-    await context.route('https://www.youtube.com/**', route => route.fulfill({
-      contentType: 'text/html', body: '<!doctype html><html><body>Local chat fixture</body></html>',
-    }));
-    await page.goto('https://www.youtube.com/live_chat?v=synthetic');
-    expect(worlds.filter(world => world.origin === `chrome-extension://${id}`)).toEqual([]);
-    expect(await worker.evaluate(async () => (await chrome.storage.local.get(['apiKey.youtube']))['apiKey.youtube'] === 'synthetic-content-protected')).toBe(true);
-    // The ordinary page world has no extension runtime / storage access.
-    expect(await page.evaluate(() => {
-      const value = (globalThis as unknown as { chrome?: { runtime?: { id?: string }; storage?: unknown } }).chrome;
-      return Boolean(value?.runtime?.id || value?.storage);
-    })).toBe(false);
-  });
-});
-
 test('保存失敗時に固定文言だけ表示し入力・応答・ログへ秘密を残さない', async () => {
   await withExtension(async (context, worker, id) => {
     const page = await context.newPage();

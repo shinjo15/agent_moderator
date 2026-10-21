@@ -116,9 +116,7 @@ TypeSafeによる取り扱いは、[TypeSafeのプライバシーポリシー](h
 
 正式公開時の施行日や、情報の取り扱いを変更する場合の案内は、公開時に確定します。本書の掲載だけで、利用者・投稿者の同意取得や、提供元による公開承認が完了したとは扱いません。
 
-[導入・操作手順](onboarding.md) ／ [非表示の詳しい動作](local-author-filter.md) ／ [Jev判定の詳しい動作](jev-moderation.md)
-
-公開前の未確認事項は、利用者向けの説明とは分けて[プライバシー公開準備チェック](release-preparation/privacy-readiness.md)に記録しています。
+[導入・操作手順](onboarding.md) ／ [利用規約（案）](terms.md)
 
 ## Sources
 

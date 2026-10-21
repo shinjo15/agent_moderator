@@ -1,29 +1,12 @@
 import type { runtime } from '../extension-runtime';
 import { DEFAULT_THRESHOLD, FILTER_PRESETS, parseThresholdInput, validThreshold } from './threshold';
 import { createNotice } from '../ui-notice';
-import { FilterSettingsFailure, validFilterFailureReason, type FilterStage } from './settings-failure';
+import { FilterSettingsFailure, publicThreshold, type FilterStage } from './settings-failure';
 import { t } from '../i18n';
 const names = { high: 'strengthHigh', medium: 'strengthMedium', low: 'strengthLow', custom: 'strengthCustom' } as const;
 type Choice = keyof typeof names;
 function choiceFor(threshold: number): Choice {
   return (Object.keys(FILTER_PRESETS) as (keyof typeof FILTER_PRESETS)[]).find(key => FILTER_PRESETS[key] === threshold) ?? 'custom';
-}
-function publicThreshold(response: unknown): number {
-  if (response === undefined || response === null) throw new FilterSettingsFailure('noResponse');
-  const object = typeof response === 'object' && !Array.isArray(response) ? response as Record<string, unknown> : undefined;
-  const value = object && typeof object.value === 'object' && object.value !== null && !Array.isArray(object.value)
-    ? object.value as Record<string, unknown> : undefined;
-  const threshold = value?.threshold;
-  const shape = { object: object !== undefined, okTrue: object?.ok === true, okFalse: object?.ok === false,
-    valueObject: value !== undefined, thresholdNumber: typeof threshold === 'number', thresholdValid: validThreshold(threshold) };
-  if (object?.ok === false) {
-    if (validFilterFailureReason(object.code)) throw new FilterSettingsFailure(object.code);
-    // Compare only our known historical denial; never render arbitrary response.error/code.
-    const legacy = object.code === undefined && object.error === 'この要求は許可されていません。';
-    throw new FilterSettingsFailure(legacy ? 'responseDeniedLegacy' : 'unknownFailureCode', shape);
-  }
-  if (!object || object.ok !== true || !value || !validThreshold(threshold)) throw new FilterSettingsFailure('invalidShape', shape);
-  return threshold;
 }
 export function createFilterSettingsPanel(main: HTMLElement, channel: Pick<typeof runtime, 'sendMessage'>) {
   const section = document.createElement('section'); section.className = 'credential-card filter-card';

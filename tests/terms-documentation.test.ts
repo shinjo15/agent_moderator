@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { expect, it } from 'vitest';
 
-it('案の同意導線と公開準備の記録を関連文書に整合させる', () => {
+it('案の同意導線を関連文書に整合させる', () => {
   expect(readFileSync('README.md', 'utf8')).toContain('](docs/terms.md)');
   for (const path of ['docs/onboarding.md', 'docs/privacy.md']) {
     const text = readFileSync(path, 'utf8');
@@ -11,8 +11,6 @@ it('案の同意導線と公開準備の記録を関連文書に整合させる'
     expect(text).toContain('再同意');
     expect(text).not.toContain('利用条件・データの扱いを確認しました');
   }
-  const audit = readFileSync('docs/release-preparation/privacy-readiness.md', 'utf8');
-  for (const token of ['../terms.md', 'MetaMask', 'VERSION', 'terms.html', 'インストール前', '裁判', '現ストア']) expect(audit).toContain(token);
 });
 
 it('一般向け規約案と同梱HTMLの日本語本文・リンクは同一で翻訳scriptのみ許可する', () => {
