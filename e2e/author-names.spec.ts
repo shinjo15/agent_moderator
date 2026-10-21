@@ -75,7 +75,7 @@ test('MV3 names: 公式応答fixture→判定→名前永続→browser再起動�
     await monitor.getByRole('button', { name: '取得を開始', exact: true }).click();
     await expect(monitor.locator('#messages .author-name')).toHaveText(['みどり', 'みどり', longName], { timeout: 15000 });
     await expect(monitor.locator('#hidden-authors .author-name')).toHaveText(['名前不明', 'みどり', longName], { timeout: 15000 });
-    await expect(frame.locator('#a')).toBeHidden(); await expect(frame.locator('#b')).toBeVisible(); await expect(frame.locator('#c')).toBeHidden();
+    await expect(frame.locator('#a')).toBeVisible(); await expect(frame.locator('#b')).toBeVisible(); await expect(frame.locator('#c')).toBeVisible();
     await monitor.getByRole('button', { name: '取得を停止', exact: true }).click();
     expect(jevCalls).toBe(3); expect(requests).toEqual(['/youtube/v3/videos', '/youtube/v3/liveChat/messages']);
     await expect(monitor.locator('#messages img, #messages script, #hidden-authors img, #hidden-authors script')).toHaveCount(0);
@@ -99,9 +99,9 @@ test('MV3 names: 公式応答fixture→判定→名前永続→browser再起動�
     await expect(reopened.monitor.locator('#hidden-authors .author-name')).toHaveText(['みどりの庭', longName]);
     await expect(reopened.monitor.locator('#messages li')).toHaveCount(0);
     const restartedFrame = reopened.watch.frames().find(f => f.url().includes('/live_chat'))!;
-    await expect(restartedFrame.locator('#a')).toBeHidden(); await expect(restartedFrame.locator('#b')).toBeVisible();
+    await expect(restartedFrame.locator('#a')).toBeVisible(); await expect(restartedFrame.locator('#b')).toBeVisible();
     await reopened.monitor.getByRole('button', { name: label('みどりの庭', a), exact: true }).click();
-    await expect(restartedFrame.locator('#a')).toBeVisible(); await expect(restartedFrame.locator('#c')).toBeHidden();
+    await expect(restartedFrame.locator('#a')).toBeVisible(); await expect(restartedFrame.locator('#c')).toBeVisible();
     await expect(reopened.monitor.locator('#hidden-authors .author-name')).toHaveText(longName);
     expect(restartCalls).toBe(0);
   } finally { await context?.close(); await rm(profile, { recursive: true, force: true }); }

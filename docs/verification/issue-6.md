@@ -1,5 +1,7 @@
 # Issue #6：文書と#5統合検証境界
 
+履歴の注意：Issue #40でYouTube本体UI変更・content/MAIN注入を撤去済み。旧権限・DOM反映・配布ファイル数は現行仕様ではない。現行契約は [保存・解除](../local-author-filter.md)。拡張内非表示・閲覧UIは#41未実装。
+
 ## 当初の独立作業（履歴）
 
 - 作業：shinjo15/agent_moderator Issue #6のみ。

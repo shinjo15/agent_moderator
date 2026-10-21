@@ -85,7 +85,7 @@ for (const operation of ['save', 'delete', 'failed-save'] as const) {
   });
 }
 
-test('実contentのisolated contextではlocal読取不可、init/設定/取得応答にキーなし', async () => {
+test('YouTubeへcontentを注入せずページにruntime/storage/キーを公開しない', async () => {
   await withExtension(async (context, worker, id) => {
     const options = await context.newPage();
     await options.goto(`chrome-extension://${id}/options.html`);
@@ -97,34 +97,12 @@ test('実contentのisolated contextではlocal読取不可、init/設定/取得�
     const worlds: { id: number; origin: string; auxData?: { type?: string } }[] = [];
     cdp.on('Runtime.executionContextCreated', event => worlds.push(event.context));
     await cdp.send('Runtime.enable');
-    // Real matching URL and manifest content injection; no live YouTube/API traffic.
+    // Real URL, local response fixture only; production must create no extension world.
     await context.route('https://www.youtube.com/**', route => route.fulfill({
       contentType: 'text/html', body: '<!doctype html><html><body>Local chat fixture</body></html>',
     }));
     await page.goto('https://www.youtube.com/live_chat?v=synthetic');
-    await expect.poll(() => worlds.some(world => world.origin === `chrome-extension://${id}` && world.auxData?.type === 'isolated')).toBe(true);
-    const world = worlds.find(world => world.origin === `chrome-extension://${id}` && world.auxData?.type === 'isolated')!;
-    const evaluated = await cdp.send('Runtime.evaluate', {
-      contextId: world.id, awaitPromise: true, returnByValue: true,
-      expression: `(async () => {
-        let localDenied = false;
-        try { await chrome.storage.local.get(null); } catch { localDenied = true; }
-        const responses = [];
-        for (const type of ['storage.init', 'credentials.get', 'credentials.save', 'credentials.delete']) {
-          responses.push(await chrome.runtime.sendMessage({type, provider: 'youtube', value: 'synthetic-attacker'}));
-        }
-        return {localDenied, responses};
-      })()`,
-    });
-    expect(evaluated.exceptionDetails).toBeUndefined();
-    expect(evaluated.result.value).toEqual({
-      localDenied: true,
-      responses: Array.from({ length: 4 }, () => ({ ok: false, error: 'この要求は許可されていません。' })),
-    });
-    const jevDenied = await cdp.send('Runtime.evaluate', { contextId: world.id, awaitPromise: true, returnByValue: true,
-      expression: `(async () => Promise.all(['jev.enable', 'jev.evaluate', 'jev.disable'].map(type => chrome.runtime.sendMessage({type, id: 'forged'}))))()` });
-    expect(jevDenied.exceptionDetails).toBeUndefined();
-    expect(jevDenied.result.value).toEqual(Array.from({ length: 3 }, () => ({ ok: false, error: { code: 'forbidden', message: 'このチャットを取得できません。視聴タブから対象を選び直してください。' } })));
+    expect(worlds.filter(world => world.origin === `chrome-extension://${id}`)).toEqual([]);
     expect(await worker.evaluate(async () => (await chrome.storage.local.get(['apiKey.youtube']))['apiKey.youtube'] === 'synthetic-content-protected')).toBe(true);
     // The ordinary page world has no extension runtime / storage access.
     expect(await page.evaluate(() => {

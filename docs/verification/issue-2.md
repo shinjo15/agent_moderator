@@ -1,5 +1,7 @@
 # Issue #2 検証記録
 
+履歴の注意：Issue #40後はYouTubeへのcontent/MAIN注入なし。旧content境界E2Eは注入なし・ページへのruntime/storage非公開検証へ置換した。キー保護・external拒否は維持。現行仕様は [保存・解除](../local-author-filter.md)。
+
 ## 対象と実行環境
 
 - 対象: shinjo15/agent_moderator Issue #2。`gh issue view 2 --repo shinjo15/agent_moderator` で要件を確認。

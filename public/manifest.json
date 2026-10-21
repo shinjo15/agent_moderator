@@ -5,21 +5,10 @@
   "description": "__MSG_extensionDescription__",
   "version": "0.1.0",
   "permissions": ["storage", "activeTab"],
-  "host_permissions": ["https://www.googleapis.com/*", "https://api.typesafe.ai/*", "https://www.youtube.com/*"],
+  "host_permissions": ["https://www.googleapis.com/*", "https://api.typesafe.ai/*"],
   "options_ui": { "page": "options.html", "open_in_tab": true },
   "action": { "default_popup": "popup.html", "default_title": "__MSG_appName__" },
   "background": { "service_worker": "background.js", "type": "module" },
-  "content_scripts": [{
-    "matches": ["https://www.youtube.com/live_chat*"],
-    "js": ["content-ids.js"],
-    "all_frames": true,
-    "world": "MAIN",
-    "run_at": "document_start"
-  }, {
-    "matches": ["https://www.youtube.com/live_chat*", "https://www.youtube.com/live_chat_replay*"],
-    "js": ["content.js"],
-    "all_frames": true,
-    "run_at": "document_idle"
-  }],
+
   "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'self'" }
 }

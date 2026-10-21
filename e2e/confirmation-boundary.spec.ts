@@ -24,7 +24,7 @@ test('MV3 background: 旧runtime/旧版/読取・保存失敗は通信0、Jev有
   const profile = await mkdtemp(join(tmpdir(), 'agent-moderator-confirmation-boundary-'));
   const extension = resolve('dist');
   const context = await chromium.launchPersistentContext(profile, { channel: 'chromium', headless: true,
-    args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`] });
+    args: ['--enable-unsafe-extension-debugging', `--disable-extensions-except=${extension}`, `--load-extension=${extension}`] });
   try {
     const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
     const id = new URL(worker.url()).hostname;
@@ -45,10 +45,14 @@ test('MV3 background: 旧runtime/旧版/読取・保存失敗は通信0、Jev有
       await options.getByRole('button', { name: `${provider}キーを保存`, exact: true }).click();
       await expect(options.getByLabel(`${provider} APIキー`)).toHaveValue('');
     }
-    // Intentionally seed only the session binding: exercise old runtime requests without new UI checks.
+    // Grant activeTab as a user action would; seed binding to bypass only the new UI checks.
     const watchOpened = context.waitForEvent('page');
     const target = await worker.evaluate(() => chrome.tabs.create({ url: 'about:blank', active: false }));
     const watch = await watchOpened; await watch.goto('https://www.youtube.com/watch?v=abcdefghijk');
+    await watch.bringToFront();
+    const cdp = await context.browser()!.newBrowserCDPSession();
+    const { targetInfos } = await cdp.send('Target.getTargets', { filter: [{ type: 'tab', exclude: false }] });
+    await cdp.send('Extensions.triggerAction', { id, targetId: targetInfos.find(tab => tab.type === 'tab' && tab.url === watch.url())!.targetId });
     const monitorOpened = context.waitForEvent('page');
     await worker.evaluate(async targetTabId => {
       const monitor = await chrome.tabs.create({ url: 'about:blank', active: false });

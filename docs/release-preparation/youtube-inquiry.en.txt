@@ -1,3 +1,5 @@
+HISTORICAL DRAFT — predates Issue #40. Do not submit as the current implementation. YouTube UI changes and content/MAIN scripts have been removed. Only collection/evaluation and saved-list management remain; in-extension hiding and the new viewing UI are not implemented (Issue #41). See native-ui-removal.md. Previously sent correspondence is unchanged; provider approval is not claimed.
+
 Subject: Pre-release compliance inquiry for a viewer-side live chat filter (Agent Moderator)
 
 Dear YouTube API Services Team,

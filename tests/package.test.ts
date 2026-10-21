@@ -13,7 +13,11 @@ it('配布zipにはdistの検証済みファイルだけを含める', () => {
     .map(entry => `${entry.parentPath}/${entry.name}`.replace(/^dist\//, ''));
   expect(Object.keys(archive).sort()).toEqual(files.sort());
   expect(Object.keys(archive)).toEqual(expect.arrayContaining(['jev-questions.json', 'terms.js', '_locales/en/messages.json', '_locales/ja/messages.json']));
+  expect(Object.keys(archive)).not.toEqual(expect.arrayContaining(['content.js']));
+  expect(Object.keys(archive)).not.toEqual(expect.arrayContaining(['content-ids.js']));
   for (const [name, bytes] of Object.entries(archive)) {
     expect(Buffer.from(bytes)).toEqual(readFileSync(`dist/${name}`));
+    if (name.endsWith('.js')) expect(Buffer.from(bytes).toString('utf8'), name)
+      .not.toMatch(/executeScript|insertCSS|registerContentScripts|agent-moderator\.identit|authorExternalChannelId|yt-live-chat-\w+-renderer|MutationObserver/);
   }
 });

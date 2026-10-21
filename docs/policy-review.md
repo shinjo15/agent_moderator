@@ -1,5 +1,7 @@
 # 公式一次資料の確認・公開前の保留条件
 
+Issue #40更新：親から共有されたYouTubeレビューのIII.F.1に従い、YouTube本体UI変更は完全撤去した。以下の#5のDOM照合・非表示に関する調査は旧版の記録であり、現行機能や用途の許可ではない。拡張内非表示・閲覧UIは#41で未実装。現行契約は [保存・解除](local-author-filter.md)、ストア差替え・新デモは [公開チェック](release-preparation/native-ui-removal.md)。他のAPI利用・保存・送信論点と承認は別に残る。
+
 確認日：2026-10-05（JST）。Issue #6独立調査。認証不要の公式ページを直接読んだ記録で、実キー・ログイン済みConsole・通常ブラウザprofileは参照していません。法的適合性の承認ではありません。
 
 ## 結論：公開配布可とは断定しない
@@ -105,13 +107,13 @@ DPAは個人データの処理目的／Documented Instructions／役割と国際
 | Updated Privacy Policy & Secure Handling Requirements — FAQ 3 / 6 / 14 | “even when data is processed or stored locally” でも開示、privacy policy掲載が必要 [8] | localキー／リスト／本文と外部送信を説明。掲載・申請は未実施 |
 | 同FAQ — 9 / 10 | 保存時強固な暗号化の記述、目立つ説明とUI内の具体的同意行為が必要 [8] | 現在のlocalキー保存を暗号化秘密保管庫と偽らない。保存時保護の適合と同意UIを要確認 |
 | Limited Use — 2 / 3 / 5 / 6 | 開示目的へ限定、単一目的に必要な情報、第三者移転・人の閲覧の制限、遵守宣言 [9] | 外部AIが必要な単一目的か、providerの処理／人の閲覧と整合するかを確認。未達の遵守宣言を捏造しない |
-| Use of Permissions — 1 | “Request access to the narrowest permissions necessary” [10] | 現行manifestは `storage`、`activeTab`、Google／TypeSafe APIおよび `https://www.youtube.com/*` のhost permission。YouTube origin全体への権限は現在タブURL照合用であり、chat pathだけへの権限制限ではない。MAIN/isolated注入はchat URL限定。[#5契約](local-author-filter.md)。この構成の規約適合は未確認 |
+| Use of Permissions — 1 | “Request access to the narrowest permissions necessary” [10] | Issue #40後は `storage`、`activeTab`、Google／TypeSafe APIのhost permissionのみ。旧 `https://www.youtube.com/*` 権限とMAIN/isolated注入は撤去。[現行契約](local-author-filter.md)。activeTabは対象タブURL確認用。改修は提供元承認の代わりではない |
 | Handling Requirements — 2 / 4 | modern cryptographyでの通信、認証情報を安全にし公開しない [18] | 固定HTTPSとキー非表示／非同梱。local保存だけで全要件完了とは扱わない |
 
 ## 親が判断／確認する残事項（未達）
 
 - [ ] YouTube派生データ禁止とJev悪質性／連投判定の関係について公式確認。
-- [ ] ローカルチャット非表示、投稿者リンク等の変更、DOM照合が各禁止条項に適合するか公式確認。
+- [ ] III.F.1の指摘に対するYouTube本体UI変更撤去を新デモで報告し、YouTube側の確認を得る。拡張内の閲覧・フィルタリングは#41未実装で別対応。
 - [ ] 非表示設定とAPI由来IDを分離し、解除までの保持と30日削除／refresh義務の関係を確認。合意仕様の無断変更なし。
 - [ ] API DataをTypeSafeへ送る権利、投稿者の個人情報、利用者自身opt-in以外の同意要件を確認。
 - [ ] TypeSafe個別Order／MCA／Privacy／DPAと実入力ログ保持日数、backup、学習事前同意例外、zero retention可否を確認。

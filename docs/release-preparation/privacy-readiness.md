@@ -1,5 +1,7 @@
 # プライバシーポリシーの公開準備チェック
 
+Issue #40更新：YouTube本体UI変更・content/MAIN注入・旧content向けID応答とYouTube host権限は撤去した。保存・一覧・解除・全削除の型とデータは維持する。拡張内非表示・閲覧UIは#41未実装。旧版の表示制御に関する以下の記録は履歴であり、現行説明は [privacy](../privacy.md)・[保存契約](../local-author-filter.md) を優先する。[ストア差替え・新デモ](native-ui-removal.md) は未実施。
+
 確認日：2026-10-08（日本時間）
 状態：利用者向けポリシーはGitHub mainに掲載済みの案で、正式施行・規約適合・一般配布の保証はない。以下は文書整備時点の記録・未達auditであり、当時の「未公開」「未反映」の記載を現在の掲載状態やコード・利用確認UIの実装状況と混同しない。
 Issue #27で全配信の非表示データ削除UI・停止と世代隔離を追加し、その説明をコードと照合した。正式施行・規約適合・提供元承認を意味しない。
@@ -47,7 +49,7 @@ Issue #27で全配信の非表示データ削除UI・停止と世代隔離を追
 
 一時メモリ、通信中のスナップショット、DOM、session、localは別の寿命。タイマーの実行が遅れる場合もあるため、すべてのコピーが60秒ちょうどに消えるとは書かない。Chromeのsession領域の消去と、workerの再作成も区別する。
 
-全配信削除はexact options URL・同一拡張ID・typeだけのIPCに限定する。backgroundの全配信epochとstoreのqueue epochをawait前に失効し、遅い取得／Jev／登録／名前更新／個別解除で旧データが書き戻る経路を遮断する。送信済み情報の取消ではない。監視画面は停止通知と一覧更新、YouTubeの全iframe/popoutは既存hidden.listの1秒定期更新で復元する。削除失敗やreadback残存は成功にしない。判定用のメモリはresetするが表示済み本文の一括消去ではない。
+全配信削除はexact options URL・同一拡張ID・typeだけのIPCに限定する。backgroundの全配信epochとstoreのqueue epochをawait前に失効し、遅い取得／Jev／登録／名前更新／個別解除で旧データが書き戻る経路を遮断する。送信済み情報の取消ではない。監視画面に停止通知と一覧更新を行う。Issue #40後はYouTubeのiframe/popoutへ通知・定期反映しない。削除失敗やreadback残存は成功にしない。判定用のメモリはresetするが表示済み本文の一括消去ではない。
 
 ### 外部通信の照合
 
