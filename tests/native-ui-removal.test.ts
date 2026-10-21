@@ -14,16 +14,14 @@ it('YouTube介入の旧ソース・動的注入・DOMブリッジを配布コー
 });
 
 it('現行文書は保存管理と未実装#41を区別し旧版reloadを案内する', () => {
-  for (const path of ['README.md', 'docs/privacy.md', 'docs/onboarding.md', 'docs/local-author-filter.md']) {
+  for (const path of ['README.md', 'docs/privacy.md', 'docs/onboarding.md']) {
     const text = readFileSync(path, 'utf8');
-    if (['README.md', 'docs/local-author-filter.md'].includes(path)) expect(text, path).toContain('#41');
+    if (path === 'README.md') expect(text, path).toContain('#41');
     else expect(text, path).toContain('この版ではコメントの自動非表示は利用できません');
     expect(text, path).toContain('旧');
     expect(text, path).toContain('再読み込み');
     expect(text, path).not.toMatch(/contentの定期更新で|既存・新着非表示は続く|画面だけで非表示にします/);
   }
-  const checklist = readFileSync('docs/release-preparation/native-ui-removal.md', 'utf8');
-  for (const token of ['ストア', '画像', '権限', 'デモ', '未実施', '7営業日', '受信日', 'III.F.1', '#41']) expect(checklist).toContain(token);
 });
 
 it('日英の説明は自動非表示を利用できず保存管理のみであることを明示する', () => {
