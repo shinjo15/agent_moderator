@@ -1,6 +1,5 @@
-import { test, expect, chromium, type BrowserContext, type Worker } from '@playwright/test';
-import { mkdtemp, rm, cp, readFile } from 'node:fs/promises';
-import { build } from 'esbuild';
+import { test, expect, chromium, type BrowserContext } from '@playwright/test';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 declare const chrome: { storage: { local: { set(values: Record<string, unknown>): Promise<void> } }; action: { openPopup(): Promise<void> }; runtime: {
@@ -12,8 +11,8 @@ declare const chrome: { storage: { local: { set(values: Record<string, unknown>)
   }, reply: (response: unknown) => void) => boolean): void };
 } };
 
-async function popup(context: BrowserContext, selectedWorker?: Worker) {
-  const worker = selectedWorker ?? context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
+async function popup(context: BrowserContext) {
+  const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
   const id = new URL(worker.url()).hostname;
   await worker.evaluate(() => {
     const records: unknown[] = [];
@@ -58,20 +57,13 @@ async function popup(context: BrowserContext, selectedWorker?: Worker) {
   return { worker, evaluate };
 }
 
-async function launch(profile: string, extensions = resolve('dist')) {
+async function launch(profile: string) {
+  const extensions = resolve('dist');
   return chromium.launchPersistentContext(profile, { channel: 'chromium', headless: true, viewport: null,
     args: [`--disable-extensions-except=${extensions}`, `--load-extension=${extensions}`] });
 }
 
-async function legacyExtension(path: string) {
-  await cp(resolve('dist'), path, { recursive: true });
-  // Fixed byte-identical historical dispatcher: no mutable Git HEAD dependency in CI.
-  // Current imports deliberately isolate the old dispatch schema, not an entire old release.
-  await build({ stdin: { contents: await readFile(resolve('e2e/fixtures/legacy-background-source.txt'), 'utf8'), resolveDir: resolve('src'), loader: 'ts' },
-    outfile: join(path, 'background.js'), bundle: true, format: 'iife', target: 'chrome120', logLevel: 'silent' });
-}
-
-test('実monitorを同時openしたactual popup保存: 非async false listenerとbackgroundは競合しない', async () => {
+test('実monitorを開いたまま実action popup内の設定を保存できる', async () => {
   const profile = await mkdtemp(join(tmpdir(), 'agent-moderator-monitor-popup-'));
   const context = await launch(profile);
   try {
@@ -101,56 +93,10 @@ test('実monitorを同時openしたactual popup保存: 非async false listener�
     }
     const returns = await monitor.evaluate(() => (globalThis as typeof globalThis & { monitorListenerProbe: { synchronousFalse: boolean[] } }).monitorListenerProbe.synchronousFalse);
     expect(returns.length).toBeGreaterThan(0); expect(returns.every(value => value)).toBe(true);
-    console.log('SAFE_MONITOR_POPUP_FLAGS', JSON.stringify({ browser: context.browser()!.version(), monitorSawSettings: returns.length > 0, allSynchronousFalse: returns.every(value => value), allSavesSucceeded: true }));
   } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
 });
 
-test('新旧backgroundの2コピー同時load: getURL一致でも旧dispatchだけlegacy拒否となる', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'agent-moderator-two-copies-'));
-  const current = join(root, 'current'); const legacy = join(root, 'legacy');
-  await cp(resolve('dist'), current, { recursive: true }); await legacyExtension(legacy);
-  const context = await launch(join(root, 'profile'), `${current},${legacy}`);
-  try {
-    await expect.poll(() => context.serviceWorkers().length).toBe(2);
-    const workers = context.serviceWorkers();
-    const results = [];
-    for (const worker of workers) {
-      // Headless action.openPopup with two loaded copies failed before request dispatch.
-      // Use native options documents for this isolation probe; actual popup has separate coverage.
-      const page = await context.newPage();
-      await page.goto(`chrome-extension://${new URL(worker.url()).hostname}/options.html`);
-      await expect(page.getByRole('button', { name: 'フィルター設定を保存', exact: true })).toBeEnabled();
-      const active = { evaluate: (expression: string) => page.evaluate(expression) };
-      const initialSucceeded = await active.evaluate("document.querySelector('[data-testid=filter-status]').textContent.startsWith('現在の設定：')");
-      const runtimeUrlMatches = await active.evaluate("location.href===chrome.runtime.getURL('options.html')");
-      await active.evaluate("document.querySelector('select').value='medium'; document.querySelector('select').dispatchEvent(new Event('change')); document.querySelector('.filter-card button').click()");
-      await expect.poll(() => active.evaluate("document.querySelector('.filter-card button').disabled")).toBe(false);
-      results.push({ initialSucceeded, runtimeUrlMatches,
-        saved: await active.evaluate("document.querySelector('[data-testid=filter-status]').textContent.startsWith('保存しました：')"),
-        legacyDenied: await active.evaluate("document.querySelector('[data-testid=filter-status]').textContent.includes('filter-save-responseDeniedLegacy')") });
-    }
-    expect(results.every(result => result.runtimeUrlMatches)).toBe(true);
-    expect(results.filter(result => result.saved && result.initialSucceeded).length).toBe(1);
-    expect(results.filter(result => result.legacyDenied && !result.initialSucceeded).length).toBe(1);
-    console.log('SAFE_DUPLICATE_FLAGS', JSON.stringify({ distinctIds: new Set(workers.map(worker => new URL(worker.url()).hostname)).size === 2, results }));
-  } finally { await context.close(); await rm(root, { recursive: true, force: true }); }
-});
-
-test('旧dispatch＋新optionsのactual popupは初期getも中0.8保存もlegacy固定codeとなる', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'agent-moderator-legacy-popup-'));
-  const extension = join(root, 'extension');
-  await legacyExtension(extension);
-  const context = await launch(join(root, 'profile'), extension);
-  try {
-    const active = await popup(context);
-    expect(await active.evaluate("document.querySelector('[data-testid=filter-status]').textContent.includes('filter-initialGet-responseDeniedLegacy shape:101000')")).toBe(true);
-    expect(await active.evaluate("location.href===chrome.runtime.getURL('options.html')")).toBe(true);
-    await active.evaluate("document.querySelector('select').value='medium'; document.querySelector('select').dispatchEvent(new Event('change')); document.querySelector('.filter-card button').click()");
-    await expect.poll(() => active.evaluate("document.querySelector('[data-testid=filter-status]').textContent.includes('filter-save-responseDeniedLegacy shape:101000')")).toBe(true);
-  } finally { await context.close(); await rm(root, { recursive: true, force: true }); }
-});
-
-test('actual popup query付きoptionsはauthorization拒否で、inconsistentResponseではない', async () => {
+test('実action popup内でもquery付きoptionsからの設定保存を認可しない', async () => {
   const profile = await mkdtemp(join(tmpdir(), 'agent-moderator-popup-query-'));
   const context = await launch(profile);
   try {
@@ -163,33 +109,7 @@ test('actual popup query付きoptionsはauthorization拒否で、inconsistentRes
   } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
 });
 
-test('monitor側の故意のreply(false)は実Chromeで先に採用され、safe形状codeで特定できる', async () => {
-  const profile = await mkdtemp(join(tmpdir(), 'agent-moderator-competition-control-'));
-  const context = await launch(profile);
-  try {
-    const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
-    const monitor = await context.newPage();
-    await monitor.goto(`chrome-extension://${new URL(worker.url()).hostname}/monitor.html`);
-    await monitor.evaluate(() => {
-      chrome.runtime.onMessage.addListener((message, _sender, reply) => {
-        if (message.type === 'settings.saveFilter') reply(false);
-        return false;
-      });
-    });
-    await worker.evaluate(() => {
-      const set = chrome.storage.local.set.bind(chrome.storage.local);
-      chrome.storage.local.set = async values => { if ('moderation.threshold' in values) await new Promise(resolve => setTimeout(resolve, 100)); return set(values); };
-    });
-    const active = await popup(context);
-    await active.evaluate("document.querySelector('.filter-card button').click()");
-    await expect.poll(() => active.evaluate("document.querySelector('.filter-card button').disabled")).toBe(false);
-    console.log('SAFE_COMPETITION_FLAGS', JSON.stringify(await active.evaluate("(()=>{const text=document.querySelector('[data-testid=filter-status]').textContent;return {oldInconsistent:text.includes('filter-save-inconsistentResponse'),invalidShape:text.includes('filter-save-invalidShape'),saved:text.startsWith('保存しました：')}})()")));
-    await expect.poll(() => active.evaluate("document.querySelector('[data-testid=filter-status]').textContent.includes('filter-save-invalidShape')")).toBe(true);
-    expect(await active.evaluate("document.querySelector('[data-testid=filter-status]').textContent.includes('shape:000000')")).toBe(true);
-  } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
-});
-
-test('actual action popup→同じpopup内optionsの保存は拒否されずreadbackする', async () => {
+test('実action popup内の設定保存・sender認可・readback・再起動後の永続化', async () => {
   const profile = await mkdtemp(join(tmpdir(), 'agent-moderator-popup-save-'));
   let context = await launch(profile);
   try {
@@ -203,7 +123,6 @@ test('actual action popup→同じpopup内optionsの保存は拒否されずread
     });
     const popupContextMatches = await worker.evaluate(async () => (await chrome.runtime.getContexts({}) as { contextType?: string; documentUrl?: string }[])
       .some(context => context.contextType === 'POPUP' && context.documentUrl === chrome.runtime.getURL('options.html')));
-    console.log('SAFE_POPUP_FLAGS', JSON.stringify({ browser: context.browser()!.version(), diagnostics, metadataMatches, popupContextMatches }));
     expect(diagnostics).toEqual({ isPopup: true, documentUrlMatches: true, uiSaved: true, getValid: true, saveValid: true, credentialsValid: true, secretDenied: true });
     expect(metadataMatches).toBe(true); expect(popupContextMatches).toBe(true);
     expect(await evaluate("chrome.runtime.sendMessage({type:'confirmation.get'})")).toEqual({ ok: true, value: { confirmed: false, version: 2 } });

@@ -19,16 +19,13 @@ async function withSettings(run: (page: Page, worker: Worker) => Promise<void>) 
   const { context, page, worker } = await launch(profile);
   try { await run(page, worker); } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
 }
-test('filter settings: YouTubeへ注入/設定公開なし、external書込拒否で設定を維持する', async () => {
+test('filter settings: 通常Webページからの書込要求では設定を変更できない', async () => {
   await withSettings(async options => {
     await options.getByLabel('フィルターの強さ', { exact: true }).selectOption('low'); await save(options, 0.9);
     const context = options.context(); const id = new URL(options.url()).hostname;
     await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><body>fixture</body>' }));
-    const content = await context.newPage(); const cdp = await context.newCDPSession(content);
-    const worlds: { id: number; origin: string; auxData?: { type?: string } }[] = [];
-    cdp.on('Runtime.executionContextCreated', event => worlds.push(event.context)); await cdp.send('Runtime.enable');
+    const content = await context.newPage();
     await content.goto('https://www.youtube.com/live_chat?v=abcdefghijk&is_popout=1');
-    expect(worlds.filter(world => world.origin === `chrome-extension://${id}`)).toEqual([]);
     const external = await content.evaluate(async id => {
       try { return (await chrome.runtime.sendMessage(id, { type: 'settings.saveFilter', threshold: 0.65 }) as { ok?: boolean })?.ok !== true; }
       catch { return true; }

@@ -45,6 +45,9 @@ test('production MV3: activeTabから選択しYouTubeタブ前面でもfixture�
       }
     });
     const options = await context.newPage();
+    const pageErrors: string[] = [];
+    context.on('page', page => page.on('pageerror', error => pageErrors.push(error.message)));
+    options.on('pageerror', error => pageErrors.push(error.message));
     await options.goto(`chrome-extension://${id}/options.html`);
 
     await expect(options.getByText(/「取得を開始」でYouTubeへ通信します/)).toBeVisible();
@@ -85,6 +88,7 @@ test('production MV3: activeTabから選択しYouTubeタブ前面でもfixture�
     expect(tokens).toEqual([null, 'next-1']);
     expect(callTimes[1] - callTimes[0]).toBeGreaterThanOrEqual(5000);
     await expect(monitor.locator('#messages img')).toHaveCount(0);
+    await expect(monitor.locator('#messages')).toContainText('<img src=x onerror=alert(1)>');
     await monitor.getByRole('button', { name: '取得を停止' }).click();
     await expect(monitor.getByRole('status')).toHaveText('取得を停止しました。');
     const count = tokens.length;
@@ -112,9 +116,13 @@ test('production MV3: activeTabから選択しYouTubeタブ前面でもfixture�
     mode = 'invalid';
     await monitor.getByRole('button', { name: '取得を開始' }).click();
     await expect(monitor.getByRole('status')).toHaveText('YouTubeからのデータを確認できず、取得を停止しました。時間をおいて取得を再開してください。', { timeout: 10000 });
+    const invalidCount = tokens.length;
+    await youtube.waitForTimeout(5500);
+    expect(tokens).toHaveLength(invalidCount);
     await youtube.goto('https://www.youtube.com/watch?v=zyxwvutsrqp');
     await expect(monitor.getByRole('button', { name: '取得を開始' })).toBeDisabled();
     await expect(monitor.getByText(/視聴タブが変更または閉じられました/)).toBeVisible();
+    expect(pageErrors).toEqual([]);
   } finally {
     await context.close();
     await rm(profile, { recursive: true, force: true });

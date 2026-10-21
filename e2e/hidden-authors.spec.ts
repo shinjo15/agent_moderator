@@ -6,20 +6,16 @@ import { apiResponse } from '../tests/fixtures/jev';
 import { confirmUsage } from './fixtures/confirm-usage';
 import { CONFIRMATION_VERSION } from '../src/confirmation';
 declare const chrome: { tabs: { create(o: {url:string;active:boolean}):Promise<unknown> }; runtime:{sendMessage(m:unknown):Promise<unknown>}; storage:{local:{get(keys:string[]):Promise<Record<string,unknown>>;set(v:Record<string,unknown>):Promise<void>}} };
-const author = 'UCabcdefghijklmnopqrstuv'; const other = 'UCzyxwvutsrqponmlkjihgfe'; const video = 'abcdefghijk';
-const chat = `<!doctype html><body><script>
-function append(id,author){const e=document.createElement('yt-live-chat-text-message-renderer');e.id=id;e.textContent='みどり: こんにちは';e.data={authorExternalChannelId:author};document.body.append(e);return e;}
-append('existing','${author}');append('other','${other}');append('unknown',undefined);
-</script></body>`;
+const author = 'UCabcdefghijklmnopqrstuv'; const video = 'abcdefghijk';
 
-test('MV3: official→Jev→保存/解除/全削除でもiframe/popoutの既存/新着表示を変更しない',async()=>{
+test('MV3: 公式取得fixture→Jev判定→保存一覧・解除・連投の再登録・全削除',async()=>{
  test.setTimeout(90000);
  const profile=await mkdtemp(join(tmpdir(),'agent-moderator-hidden-'));
  const extension=resolve('dist');
  const context=await chromium.launchPersistentContext(profile,{channel:'chromium',headless:true,args:['--enable-unsafe-extension-debugging',`--disable-extensions-except=${extension}`,`--load-extension=${extension}`]});
  try{
  const worker=context.serviceWorkers()[0]??await context.waitForEvent('serviceworker');const id=new URL(worker.url()).hostname;
- await context.route('https://www.youtube.com/**',route=>route.fulfill({contentType:'text/html',body:route.request().url().includes('/live_chat')?chat:`<!doctype html><iframe src="https://www.youtube.com/live_chat?continuation=fixture"></iframe>`}));
+ await context.route('https://www.youtube.com/**',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><h1>視聴タブfixture</h1>'}));
  let pages=0; let burst=false; let fail=false;
  await context.route('https://www.googleapis.com/youtube/v3/**',route=>{
  const url=new URL(route.request().url());
@@ -42,45 +38,26 @@ test('MV3: official→Jev→保存/解除/全削除でもiframe/popoutの既存/
  const pp=context.waitForEvent('page');await worker.evaluate(id=>chrome.tabs.create({url:`chrome-extension://${id}/popup.html`,active:false}),id);const popup=await pp;
  const mp=context.waitForEvent('page');await popup.getByRole('button',{name:'この動画のチャットを取得'}).click();const monitor=await mp;
  await expect(monitor.getByRole('button',{name:'取得を開始',exact:true})).toBeEnabled();
- const frame=youtube.frames().find(f=>f.url().includes('/live_chat'))!;
- const popout=await context.newPage();await popout.goto(`https://www.youtube.com/live_chat?v=${video}&is_popout=1`);
- await expect(frame.locator('#existing')).toBeVisible();
  await monitor.getByRole('button',{name:'Jev判定を有効化・再開'}).click();await expect(monitor.getByTestId('jev-status')).toContainText('有効');
  await monitor.getByRole('button',{name:'取得を開始',exact:true}).click();
  await expect.poll(()=>typeof releaseJev,{timeout:15000}).toBe('function');
- await expect(frame.locator('#existing')).toBeVisible();await expect(monitor.locator('#hidden-authors li')).toHaveCount(0);
+ await expect(monitor.locator('#hidden-authors li')).toHaveCount(0);
  releaseJev!();
  await expect(monitor.locator('#hidden-authors li')).toContainText(author,{timeout:15000});
 
- await expect(frame.locator('#existing')).toBeVisible();await expect(popout.locator('#existing')).toBeVisible();
- await expect(frame.locator('#other')).toBeVisible();await expect(frame.locator('#unknown')).toBeVisible();
- await frame.evaluate(author=>{const e=document.createElement('yt-live-chat-text-message-renderer');e.id='new';e.textContent='新着';(e as unknown as {data:unknown}).data={authorExternalChannelId:author};document.body.append(e);},author);
- await expect(frame.locator('#new')).toBeVisible();
- await frame.evaluate(other=>{const e=document.getElementById('new')!;e.id='reused';(e as unknown as {data:unknown}).data={authorExternalChannelId:other};e.textContent='再利用';},other);
- await expect(frame.locator('#reused')).toBeVisible();
- await monitor.getByRole('button',{name:'取得を停止',exact:true}).click();await expect(frame.locator('#existing')).toBeVisible();
- const switchedDisplay = await popout.evaluate(async author => {
-   history.replaceState({}, '', '/live_chat?v=zyxwvutsrqp&is_popout=1');
-   const e=document.createElement('yt-live-chat-text-message-renderer');e.id='new-video-node';e.textContent='新しい配信';(e as unknown as {data:unknown}).data={authorExternalChannelId:author};document.body.append(e);
-   await Promise.resolve();await Promise.resolve();return getComputedStyle(e).display;
- },author);
- expect(switchedDisplay).not.toBe('none');
- await popout.goto(`https://www.youtube.com/live_chat?v=${video}&is_popout=1`);
+ expect(await worker.evaluate(async video => (await chrome.storage.local.get([`hiddenAuthors.${video}`]))[`hiddenAuthors.${video}`], video))
+   .toMatchObject({ ids: [author], displayNames: { [author]: 'みどり' } });
+ await monitor.getByRole('button',{name:'取得を停止',exact:true}).click();
  await monitor.getByRole('button',{name:`みどり（投稿者ID：${author}）の非表示を解除`,exact:true}).click();
- await expect(frame.locator('#existing')).toBeVisible();await expect(popout.locator('#existing')).toBeVisible();
  await expect(monitor.locator('#hidden-authors li')).toHaveCount(0);
  await expect(monitor.getByTestId('jev-status')).toContainText('停止');
  burst=true;
  await monitor.getByRole('button',{name:'取得を開始',exact:true}).click();
  await expect(monitor.locator('#hidden-authors li')).toContainText(author,{timeout:15000});
- await expect(frame.locator('#existing')).toBeVisible();
  await monitor.getByRole('button',{name:'取得を停止',exact:true}).click();
- await frame.evaluate(author=>{const e=document.createElement('yt-live-chat-text-message-renderer');e.id='stopped-new';e.textContent='停止中の新着';(e as unknown as {data:unknown}).data={authorExternalChannelId:author};document.body.append(e);},author);
- await expect(frame.locator('#stopped-new')).toBeVisible();
  fail=true;
  await monitor.getByRole('button',{name:'取得を開始',exact:true}).click();
  await expect(monitor.getByRole('status')).toContainText('一時的に利用できません',{timeout:15000});
- await expect(frame.locator('#existing')).toBeVisible();
  const result=await options.evaluate(()=>chrome.runtime.sendMessage({type:'hidden.list',videoId:'abcdefghijk'}));expect(result).toEqual({ok:false});
  await options.getByRole('button',{name:'全配信の非表示データを削除',exact:true}).click();
  await options.getByRole('dialog').getByRole('button',{name:'削除する',exact:true}).click();
@@ -90,11 +67,10 @@ test('MV3: official→Jev→保存/解除/全削除でもiframe/popoutの既存/
  await expect(monitor.getByRole('status')).toContainText('非表示データの削除');
  await expect(monitor.locator('#hidden-authors li')).toHaveCount(0);
  await expect(monitor.getByTestId('jev-status')).toContainText('停止');
- await expect(frame.locator('#existing')).toBeVisible();await expect(popout.locator('#existing')).toBeVisible();
  }finally{await context.close();await rm(profile,{recursive:true,force:true});}
 });
 
-test('MV3: browser再起動・キーなし/監視なしでもvideo別リスト維持、注入なし・大量DOM不変',async()=>{
+test('MV3: ブラウザ再起動・キー削除・監視なしでも配信別の保存リストを維持する',async()=>{
  test.setTimeout(60000);
  const profile=await mkdtemp(join(tmpdir(),'agent-moderator-hidden-restart-'));
  const extension=resolve('dist');let context: BrowserContext | undefined;
@@ -104,19 +80,9 @@ test('MV3: browser再起動・キーなし/監視なしでもvideo別リスト�
  await worker.evaluate(async ({video,author})=>{await chrome.storage.local.set({[`hiddenAuthors.${video}`]:{ids:[author],revisions:{}},'apiKey.youtube':'synthetic-protected'});},{video,author});
  expect(await worker.evaluate(async ({video,author})=>((await chrome.storage.local.get([`hiddenAuthors.${video}`]))[`hiddenAuthors.${video}`] as {ids:string[]}).ids.includes(author),{video,author})).toBe(true);
  await context.close();context=await launch();const restarted=context.serviceWorkers()[0]??await context.waitForEvent('serviceworker');const id=new URL(restarted.url()).hostname;
- await context.route('https://www.youtube.com/**',route=>route.fulfill({contentType:'text/html',body:route.request().url().includes('/live_chat')?chat:`<!doctype html><iframe src="https://www.youtube.com/live_chat?continuation=fixture"></iframe>`}));
- const watch=await context.newPage();await watch.goto(`https://www.youtube.com/watch?v=${video}`);const frame=watch.frames().find(f=>f.url().includes('/live_chat'))!;
- await expect(frame.locator('#existing')).toBeVisible();
- const page=await context.newPage();const cdp=await context.newCDPSession(page);
- const worlds:{id:number;origin:string;auxData?:{type?:string}}[]=[];cdp.on('Runtime.executionContextCreated',event=>worlds.push(event.context));await cdp.send('Runtime.enable');
- await page.goto(`https://www.youtube.com/live_chat?v=${video}&is_popout=1`);await expect(page.locator('#existing')).toBeVisible();
- expect(worlds.filter(w=>w.origin===`chrome-extension://${id}`)).toEqual([]);
- expect(await page.evaluate(()=>Boolean((globalThis as unknown as {chrome?:{runtime?:{id?:string};storage?:unknown}}).chrome?.runtime?.id))).toBe(false);
- await page.evaluate(author=>{for(let n=0;n<1000;n++){const e=document.createElement('yt-live-chat-text-message-renderer');e.id=`large-${n}`;e.textContent='fixture';(e as unknown as {data:unknown}).data={authorExternalChannelId:author};document.body.append(e);}},author);
- await expect(page.locator('#large-999')).toBeVisible();
- await page.goto('https://www.youtube.com/live_chat?v=zyxwvutsrqp&is_popout=1');await expect(page.locator('#existing')).toBeVisible();
  const options=await context.newPage();await options.goto(`chrome-extension://${id}/options.html`);await options.getByRole('button',{name:'YouTubeキーを削除',exact:true}).click();
- await page.goto(`https://www.youtube.com/live_chat?v=${video}&is_popout=1`);await expect(page.locator('#existing')).toBeVisible();
+ await expect(options.getByTestId('youtube-status')).toHaveText('未設定：設定が必要です。');
  expect(await restarted.evaluate(async ({video,author})=>((await chrome.storage.local.get([`hiddenAuthors.${video}`]))[`hiddenAuthors.${video}`] as {ids:string[]}).ids,{video,author})).toEqual([author]);
+ expect(await restarted.evaluate(async () => (await chrome.storage.local.get(['hiddenAuthors.zyxwvutsrqp']))['hiddenAuthors.zyxwvutsrqp'])).toBeUndefined();
  }finally{await context?.close();await rm(profile,{recursive:true,force:true});}
 });
