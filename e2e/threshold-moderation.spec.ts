@@ -82,7 +82,7 @@ test('MV3 threshold: 実policy/runtime/非表示・0/1・遅延snapshot/cached�
       await expect(row).toContainText(scenario.malicious ? '悪質' : '該当なし');
       if (scenario.malicious) {
         await expect(monitor.locator('#hidden-authors')).toContainText(authors[index]);
-        await expect(frame.locator(`#author-${index}`)).toBeHidden();
+        await expect(frame.locator(`#author-${index}`)).toBeVisible();
       } else {
         await expect(monitor.locator('#hidden-authors')).not.toContainText(authors[index]);
         await expect(frame.locator(`#author-${index}`)).toBeVisible();
@@ -93,7 +93,7 @@ test('MV3 threshold: 実policy/runtime/非表示・0/1・遅延snapshot/cached�
         expect(calls).toBe(before + 1);
       }
       await monitor.getByRole('button', { name: '取得を停止', exact: true }).click();
-      await expect(frame.locator('#author-0')).toBeHidden();
+      await expect(frame.locator('#author-0')).toBeVisible();
       expect(calls).toBe(before + 1);
     }
     expect(calls).toBe(cases.length);

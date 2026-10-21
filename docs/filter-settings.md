@@ -1,5 +1,7 @@
 # フィルターの強さ・判定の基準値
 
+Issue #40更新：YouTube本体の非表示は撤去済み。本文の「非表示」は保存リスト登録・解除を指し、拡張内コメントへの表示適用も#41で未実装。判定threshold、保存値、既存データ、認可・停止境界は変更していない。旧DOM反映に関する検証記述は旧版の履歴。
+
 ## ユーザー設定
 
 - 設定画面の「フィルターの強さ」は、高0.65／中0.8／低0.9。未保存のlegacyプロファイルの初期値は中0.8。
@@ -46,4 +48,4 @@ backgroundの`src/jev/settings.ts`が、`initializeCredentialStorage()`のTRUSTE
 - `filter-save-readback` はbackendの書込直後確認の失敗、`filter-readback-read` はUIの追加読戻し要求中のstorage読取失敗であり、混同しない。失敗時は保存成功と表示しない。
 - trusted storage初期化の失敗Promiseは破棄する。失敗した操作は失敗のままとし、後続操作で再初期化に成功するまで読み書きしない。成功したgateは共有する。これにより一時初期化失敗がworkerの存続中ずっと再利用される経路を防ぐ。Jev/YouTube要求の自動retryは追加しない。
 
-unitとheadless Chromium MV3 E2Eでpreset/custom/0/1、不正値、読戻し失敗、キー下書き保持、非trusted拒否、再起動、in-flight/cached snapshot、実production policy/runtimeからローカル非表示までを検証する。Jev/YouTubeの応答はfixtureであり実API実績ではない。実API精度・課金・速度、利用規約適合、ユーザーのWindows Chromeでの可視UIは未検証。
+unitとheadless Chromium MV3 E2Eでpreset/custom/0/1、不正値、読戻し失敗、キー下書き保持、非trusted拒否、再起動、in-flight/cached snapshot、実production policy/runtimeから保存リスト登録までを検証する。Jev/YouTubeの応答はfixtureであり実API実績ではない。実API精度・課金・速度、利用規約適合、ユーザーのWindows Chromeでの可視UIは未検証。

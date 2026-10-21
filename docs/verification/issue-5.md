@@ -1,5 +1,7 @@
 # Issue #5 検証記録
 
+履歴の注意：Issue #40でYouTube本体UI変更・content/MAIN注入を撤去済み。本書の旧DOM実測は現行機能の保証ではない。現行契約は [保存・解除](../local-author-filter.md)。拡張内非表示・閲覧UIは#41未実装。
+
 ## 対象と区別
 
 対象は配信別local非表示store、公式取得/確定判定からの登録、安全IPC、既存・新着・再利用DOMの非表示、monitor一覧・解除、停止と動画/キー変更の世代境界。仕様・保持とMAIN依存の限界は [../local-author-filter.md](../local-author-filter.md)。

@@ -24,15 +24,11 @@ test('MV3 全削除: popup設定cancel/赤hover/複数monitor/iframe/popout/全l
     const watch = await context.newPage(); await watch.goto(`https://www.youtube.com/watch?v=${video}`);
     const frame = watch.frames().find(f => f.url().includes('/live_chat'))!;
     const popout = await context.newPage(); await popout.goto(`https://www.youtube.com/live_chat?v=${video}&is_popout=1`);
-    await expect(frame.locator('#existing')).toBeHidden(); await expect(popout.locator('#existing')).toBeHidden();
+    await expect(frame.locator('#existing')).toBeVisible(); await expect(popout.locator('#existing')).toBeVisible();
     const cdp = await context.newCDPSession(popout);
     const worlds: { id: number; origin: string; auxData?: { type?: string } }[] = [];
     cdp.on('Runtime.executionContextCreated', event => worlds.push(event.context)); await cdp.send('Runtime.enable');
-    await expect.poll(() => worlds.some(w => w.origin === `chrome-extension://${id}` && w.auxData?.type === 'isolated')).toBe(true);
-    const world = worlds.find(w => w.origin === `chrome-extension://${id}` && w.auxData?.type === 'isolated')!;
-    const denied = await cdp.send('Runtime.evaluate', { contextId: world.id, awaitPromise: true, returnByValue: true,
-      expression: "chrome.runtime.sendMessage({type:'hidden.clearAll'})" });
-    expect(denied.result.value).toEqual({ ok: false });
+    expect(worlds.filter(w => w.origin === `chrome-extension://${id}`)).toEqual([]);
     const monitors = await Promise.all([context.newPage(), context.newPage()]);
     for (const page of monitors) await page.goto(`chrome-extension://${id}/monitor.html`);
     const popup = await context.newPage(); await popup.goto(`chrome-extension://${id}/popup.html`);
@@ -93,7 +89,7 @@ test('MV3 統合: 未確認でも全削除可能、削除後の未確認明示�
   const profile = await mkdtemp(join(tmpdir(), 'publication-reconcile-unconfirmed-'));
   const extension = resolve('dist');
   const context = await chromium.launchPersistentContext(profile, { channel: 'chromium', headless: true,
-    args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`] });
+    args: ['--enable-unsafe-extension-debugging', `--disable-extensions-except=${extension}`, `--load-extension=${extension}`] });
   try {
     const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
     const id = new URL(worker.url()).hostname;
@@ -104,6 +100,10 @@ test('MV3 統合: 未確認でも全削除可能、削除後の未確認明示�
     const watchOpened = context.waitForEvent('page');
     const target = await worker.evaluate(() => chrome.tabs.create({ url: 'about:blank', active: false }));
     const watch = await watchOpened; await watch.goto('https://www.youtube.com/watch?v=abcdefghijk');
+    await watch.bringToFront();
+    const cdp = await context.browser()!.newBrowserCDPSession();
+    const { targetInfos } = await cdp.send('Target.getTargets', { filter: [{ type: 'tab', exclude: false }] });
+    await cdp.send('Extensions.triggerAction', { id, targetId: targetInfos.find(tab => tab.type === 'tab' && tab.url === watch.url())!.targetId });
     const monitorOpened = context.waitForEvent('page');
     await worker.evaluate(async ({ targetTabId, author }) => {
       const monitor = await chrome.tabs.create({ url: 'about:blank', active: false });

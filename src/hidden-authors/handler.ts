@@ -1,16 +1,7 @@
 import type { MessageSender } from '../extension-runtime';
 import { videoIdFromUrl } from '../youtube/video-id';
 import { validAuthor, validVideo, type createHiddenAuthors } from './store';
-export function chatVideo(url: string | undefined, referrer = ''): string | undefined {
-  try {
-    const parsed = new URL(url ?? '');
-    if (parsed.origin !== 'https://www.youtube.com' || parsed.pathname !== '/live_chat') return;
-    const direct = parsed.searchParams.get('v');
-    if (validVideo(direct)) return direct;
-    if (parsed.searchParams.has('v')) return;
-    return videoIdFromUrl(referrer);
-  } catch { return; }
-}
+
 export function createHiddenAuthorHandler({ store, tabs, session, runtime, clearAll }: {
   clearAll?(): Promise<void>;
   store: ReturnType<typeof createHiddenAuthors>;
@@ -40,13 +31,8 @@ export function createHiddenAuthorHandler({ store, tabs, session, runtime, clear
         else if (m.type !== 'hidden.list' || Object.keys(m).length !== 2) return denied;
         const authors = await store.listAuthors(m.videoId);
         return { ok: true, videoId: m.videoId, ids: authors.map(author => author.authorChannelId), authors };
-      } else {
-        if (m.type !== 'hidden.list' || Object.keys(m).length !== 3 || typeof m.referrer !== 'string'
-          || chatVideo(sender.url, m.referrer) !== m.videoId) return denied;
-        const current = (await tabs.get(tab!.id!)).url;
-        if ((videoIdFromUrl(current) ?? chatVideo(current)) !== m.videoId) return denied;
       }
-      return { ok: true, videoId: m.videoId, ids: await store.list(m.videoId) };
+      return denied;
     } catch { return denied; }
   }
   return { handle };

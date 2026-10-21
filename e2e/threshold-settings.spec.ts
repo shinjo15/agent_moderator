@@ -19,7 +19,7 @@ async function withSettings(run: (page: Page, worker: Worker) => Promise<void>) 
   const { context, page, worker } = await launch(profile);
   try { await run(page, worker); } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
 }
-test('filter settings: content/externalの有効payload書込も拒否しpublic設定以外を返さない', async () => {
+test('filter settings: YouTubeへ注入/設定公開なし、external書込拒否で設定を維持する', async () => {
   await withSettings(async options => {
     await options.getByLabel('フィルターの強さ', { exact: true }).selectOption('low'); await save(options, 0.9);
     const context = options.context(); const id = new URL(options.url()).hostname;
@@ -28,11 +28,7 @@ test('filter settings: content/externalの有効payload書込も拒否しpublic�
     const worlds: { id: number; origin: string; auxData?: { type?: string } }[] = [];
     cdp.on('Runtime.executionContextCreated', event => worlds.push(event.context)); await cdp.send('Runtime.enable');
     await content.goto('https://www.youtube.com/live_chat?v=abcdefghijk&is_popout=1');
-    await expect.poll(() => worlds.some(world => world.origin === `chrome-extension://${id}` && world.auxData?.type === 'isolated')).toBe(true);
-    const world = worlds.find(world => world.origin === `chrome-extension://${id}` && world.auxData?.type === 'isolated')!;
-    const response = await cdp.send('Runtime.evaluate', { contextId: world.id, awaitPromise: true, returnByValue: true,
-      expression: `(async()=>({read:await chrome.runtime.sendMessage({type:'settings.getFilter'}),write:await chrome.runtime.sendMessage({type:'settings.saveFilter',threshold:0.65})}))()` });
-    expect(response.result.value).toEqual({ read: { ok: false, error: 'この要求は許可されていません。', code: 'authorization' }, write: { ok: false, error: 'この要求は許可されていません。', code: 'authorization' } });
+    expect(worlds.filter(world => world.origin === `chrome-extension://${id}`)).toEqual([]);
     const external = await content.evaluate(async id => {
       try { return (await chrome.runtime.sendMessage(id, { type: 'settings.saveFilter', threshold: 0.65 }) as { ok?: boolean })?.ok !== true; }
       catch { return true; }
