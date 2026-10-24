@@ -35,13 +35,14 @@ test('YouTube各画面へ注入せずDOM/CSS/標準操作を維持し、実判�
     const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
     const id = new URL(worker.url()).hostname;
     await worker.evaluate(({ video, author }) => chrome.storage.local.set({
-      [`hiddenAuthors.${video}`]: { ids: [author], revisions: {}, displayNames: { [author]: 'みどり' } },
+      'hiddenAuthors.channel.UC0000000000000000000000': { ids: [author], revisions: {}, displayNames: { [author]: 'みどり' } },
+      [`hiddenAuthors.scope.${video}`]: 'UC0000000000000000000000',
     }), { video, author });
     await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html; charset=utf-8', body:
       route.request().url().includes('/watch?') ? fixture.replace('</body>', `<iframe src="https://www.youtube.com/live_chat?v=${video}"></iframe></body>`) : fixture }));
     await context.route('https://www.googleapis.com/youtube/v3/**', route => route.fulfill({ json:
       new URL(route.request().url()).pathname.endsWith('/videos')
-        ? { items: [{ id: video, liveStreamingDetails: { activeLiveChatId: 'fixture-chat' } }] }
+        ? { items: [{ id: video, snippet: { channelId: 'UC0000000000000000000000' }, liveStreamingDetails: { activeLiveChatId: 'fixture-chat' } }] }
         : { nextPageToken: 'next', pollingIntervalMillis: 5000, items: [{ id: 'native-boundary-post',
           snippet: { type: 'textMessageEvent', hasDisplayContent: true, displayMessage: 'APIから取得したコメント' },
           authorDetails: { channelId: author, displayName: 'みどり' } }] },
@@ -124,9 +125,9 @@ test('YouTube各画面へ注入せずDOM/CSS/標準操作を維持し、実判�
         await expectNativeUnchanged();
         await monitor.close(); await popup.close();
         // Remaining URL forms also start with a stored matching author.
-        await worker.evaluate(({ video, author }) => chrome.storage.local.set({
-          [`hiddenAuthors.${video}`]: { ids: [author], revisions: {} },
-        }), { video, author });
+        await worker.evaluate(author => chrome.storage.local.set({
+          'hiddenAuthors.channel.UC0000000000000000000000': { ids: [author], revisions: {} },
+        }), author);
       }
       for (const frame of page.frames()) {
         await frame.locator('#chat-toggle').click(); await frame.locator('#block').click();

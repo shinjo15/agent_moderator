@@ -25,7 +25,7 @@ function setup() {
     get: vi.fn(async (_id: number) => ({ type: 'normal' })),
     update: vi.fn(async (_id: number, _options: { focused: boolean }) => ({})),
   };
-  const client = { resolveVideo: vi.fn().mockResolvedValue({ ok: true, value: { liveChatId: 'chat-1' } }),
+  const client = { resolveVideo: vi.fn().mockResolvedValue({ ok: true, value: { liveChatId: 'chat-1', broadcasterChannelId: 'UC0000000000000000000000' } }),
     listMessages: vi.fn().mockResolvedValue({ ok: true, value: { messages: [], nextPageToken: 'next', pollingIntervalMillis: 8000, ended: false } }) };
   const readApiKey = vi.fn(async () => 'fixture-key' as string | undefined);
   let now = 0;
@@ -36,6 +36,96 @@ function setup() {
 const popup = { id: 'test', url: 'chrome-extension://test/popup.html' };
 const monitor = { id: 'test', url: 'chrome-extension://test/monitor.html', tab: { id: 10 } };
 const open = { type: 'youtube.openMonitor', tabId: 9, videoId: 'abcdefghijk' };
+
+it('resolve前はscope未確定、成功時だけ旧保存を移行しworker再作成後も同scopeを復元する', async () => {
+  const { deps, values, advance } = setup(); const channel = 'UC0000000000000000000000'; const author = 'UCabcdefghijklmnopqrstuv';
+  values['hiddenAuthors.abcdefghijk'] = { ids: [author], revisions: {} };
+  const storage = { ...deps.session, get: async (keys: string[] | null) => keys === null ? structuredClone(values)
+    : Object.fromEntries(keys.map(key => [key, structuredClone(values[key])])) };
+  const store = createHiddenAuthors({ storage, initialize: deps.initialize });
+  const handler = createYouTubeHandler({ ...deps, hiddenAuthors: store });
+  await handler.handle(open, popup);
+  expect(values['youtube.monitorBinding']).not.toHaveProperty('broadcasterChannelId');
+  expect(await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'resolve' }, monitor)).toMatchObject({ ok: true });
+  expect(values['youtube.monitorBinding']).toMatchObject({ broadcasterChannelId: channel });
+  expect(await store.list(channel)).toEqual([author]); expect(values['hiddenAuthors.abcdefghijk']).toBeUndefined();
+  advance(8000);
+  const restarted = createYouTubeHandler({ ...deps, hiddenAuthors: createHiddenAuthors({ storage, initialize: deps.initialize }) });
+  expect(await restarted.handle({ type: 'youtube.list', liveChatId: 'chat-1', requestId: 'wake' }, monitor)).toMatchObject({ ok: true });
+  expect(deps.client.resolveVideo).toHaveBeenCalledTimes(1);
+});
+
+it('確認済み動画はworker再作成・キー削除・monitor再選択後も追加APIなしで一覧scopeを復元する', async () => {
+  const { deps, values } = setup();
+  const store = createHiddenAuthors({ storage: deps.session, initialize: deps.initialize });
+  const handler = createYouTubeHandler({ ...deps, hiddenAuthors: store });
+  await handler.handle(open, popup); await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'confirmed' }, monitor);
+  deps.readApiKey.mockResolvedValue(undefined);
+  const restarted = createYouTubeHandler({ ...deps, hiddenAuthors: createHiddenAuthors({ storage: deps.session, initialize: deps.initialize }) });
+  await restarted.handle(open, popup);
+  expect(values['youtube.monitorBinding']).toMatchObject({ broadcasterChannelId: 'UC0000000000000000000000' });
+  expect(values['youtube.monitorBinding']).not.toHaveProperty('liveChatId');
+  expect(deps.client.resolveVideo).toHaveBeenCalledTimes(1);
+});
+
+it('再resolve失敗では旧scopeを無効化し、別動画/配信者への切替は旧リストを混ぜない', async () => {
+  const { deps, values, advance } = setup(); const channel = 'UC0000000000000000000000'; const other = 'UC1111111111111111111111';
+  const store = createHiddenAuthors({ storage: deps.session, initialize: deps.initialize });
+  const handler = createYouTubeHandler({ ...deps, hiddenAuthors: store });
+  await handler.handle(open, popup);
+  await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'first' }, monitor);
+  await store.add(channel, 'UCabcdefghijklmnopqrstuv', 0); advance(5000);
+  deps.client.resolveVideo.mockResolvedValueOnce(failure('invalidResponse'));
+  expect(await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'fail' }, monitor)).toMatchObject({ ok: false });
+  expect(values['youtube.monitorBinding']).not.toHaveProperty('broadcasterChannelId');
+  expect(await handler.handle({ type: 'youtube.list', liveChatId: 'chat-1', requestId: 'stale' }, monitor)).toMatchObject({ ok: false });
+  expect(deps.client.listMessages).not.toHaveBeenCalled();
+  await createYouTubeHandler({ ...deps, hiddenAuthors: store }).handle(open, popup);
+  expect(values['youtube.monitorBinding']).not.toHaveProperty('broadcasterChannelId');
+  expect(await store.channelForVideo(open.videoId)).toBeUndefined();
+  advance(5000); deps.tabs.get.mockImplementation(async id => ({ id, windowId: id === 9 ? 1 : 2,
+    url: id === 9 ? 'https://www.youtube.com/watch?v=zyxwvutsrqp' : monitor.url }));
+  await handler.handle({ ...open, videoId: 'zyxwvutsrqp' }, popup);
+  deps.client.resolveVideo.mockResolvedValueOnce({ ok: true, value: { liveChatId: 'chat-2', broadcasterChannelId: other } });
+  await handler.handle({ type: 'youtube.resolve', videoId: 'zyxwvutsrqp', requestId: 'other' }, monitor);
+  expect(values['youtube.monitorBinding']).toMatchObject({ broadcasterChannelId: other });
+  expect(await store.list(other)).toEqual([]); expect(await store.list(channel)).toEqual(['UCabcdefghijklmnopqrstuv']);
+});
+
+it('再resolve前に受信しbinding読取待ちの旧listは、同scope再確定後も送信しない', async () => {
+  const { deps, advance } = setup(); const handler = createYouTubeHandler(deps);
+  await handler.handle(open, popup);
+  await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'initial' }, monitor); advance(5000);
+  const entered = deferred(); const release = deferred(); const original = deps.session.get.getMockImplementation()!;
+  deps.session.get.mockImplementationOnce(async keys => { const snapshot = structuredClone(await original(keys)); entered.resolve(); await release.promise; return snapshot; });
+  const stale = handler.handle({ type: 'youtube.list', requestId: 'old', liveChatId: 'chat-1' }, monitor);
+  await entered.promise;
+  expect(await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'again' }, monitor)).toMatchObject({ ok: true });
+  advance(5000); release.resolve();
+  expect(await stale).toMatchObject({ ok: false }); expect(deps.client.listMessages).not.toHaveBeenCalled();
+});
+
+it('scope変更前の版2同意ではYouTube/Jevを送信せず版3への再同意を要求する', async () => {
+  const { deps } = setup();
+  const confirmation = createConfirmation({ storage: { get: async () => ({ [CONFIRMATION_KEY]: { version: 2 } }), set: async () => {} }, initialize: deps.initialize });
+  const jev = vi.fn(async () => new Response(JSON.stringify(apiResponse())));
+  const moderation = createUnconfirmedModeration({ client: createJevClient(jev), readKey: async () => 'synthetic', readConfirmation: confirmation.read });
+  const handler = createYouTubeHandler({ ...deps, moderation, readConfirmation: confirmation.read });
+  await handler.handle(open, popup);
+  expect(await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'version2' }, monitor)).toMatchObject({ ok: false, error: { code: 'confirmationRequired' } });
+  expect(await handler.handle({ type: 'jev.enable' }, monitor)).toMatchObject({ ok: false, error: { code: 'confirmationRequired' } });
+  expect(deps.client.resolveVideo).not.toHaveBeenCalled(); expect(jev).not.toHaveBeenCalled();
+  expect(CONFIRMATION_VERSION).toBe(3);
+});
+
+it('復元bindingの配信者欠落/不正ではlistを送信せず再resolveを要求する', async () => {
+  for (const broadcasterChannelId of [undefined, 'invalid']) {
+    const { deps, values } = setup();
+    values['youtube.monitorBinding'] = { monitorTabId: 10, targetTabId: 9, videoId: open.videoId, liveChatId: 'chat-1', broadcasterChannelId };
+    expect(await createYouTubeHandler(deps).handle({ type: 'youtube.list', liveChatId: 'chat-1', requestId: 'invalid' }, monitor)).toMatchObject({ ok: false });
+    expect(deps.client.listMessages).not.toHaveBeenCalled();
+  }
+});
 it('通常Chrome別窓を新規作成し、binding保存後にmonitorへ遷移し再利用する（視聴窓には触れない）', async () => {
   const { deps, values } = setup();
   const handler = createYouTubeHandler(deps);
@@ -147,7 +237,7 @@ it('全削除で遅延list/queueとcached判定を失効、cooldown保持、明�
   deps.client.listMessages.mockResolvedValue({ ok: true, value: { messages: [post], nextPageToken: 'next', pollingIntervalMillis: 8000, ended: false } });
   await handler.handle({ type: 'youtube.list', requestId: 'cached-list', liveChatId: 'chat-1' }, monitor);
   await handler.handle({ type: 'jev.evaluate', id: 'cached' }, monitor);
-  expect(await hiddenAuthors.list(open.videoId)).toEqual([post.authorChannelId]); advance(8000);
+  expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([post.authorChannelId]); advance(8000);
   const entered = deferred(); const late = deferred<unknown>();
   deps.client.listMessages.mockImplementationOnce(() => { entered.resolve(); return late.promise; });
   const first = handler.handle({ type: 'youtube.list', requestId: 'late-list', liveChatId: 'chat-1' }, monitor); await entered.promise;
@@ -160,7 +250,7 @@ it('全削除で遅延list/queueとcached判定を失効、cooldown保持、明�
   expect(await first).toEqual(failure('aborted')); expect(await queued).toEqual(failure('aborted'));
   expect(await handler.handle({ type: 'jev.evaluate', id: 'cached' }, monitor)).toMatchObject({ ok: false });
   expect(await handler.handle({ type: 'youtube.list', requestId: 'old-page', liveChatId: 'chat-1' }, monitor)).toMatchObject({ ok: false });
-  expect(await hiddenAuthors.list(open.videoId)).toEqual([]);
+  expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([]);
   expect(await handler.handle({ type: 'youtube.resolve', requestId: 'too-soon', videoId: open.videoId }, monitor)).toMatchObject({ ok: false, error: { code: 'rateLimited' } });
   advance(30000);
   expect(await handler.handle({ type: 'jev.enable' }, monitor)).toEqual({ ok: true });
@@ -168,7 +258,7 @@ it('全削除で遅延list/queueとcached判定を失効、cooldown保持、明�
   deps.client.listMessages.mockResolvedValue({ ok: true, value: { messages: [{ ...post, id: 'new' }], nextPageToken: 'new', pollingIntervalMillis: 8000, ended: false } });
   expect(await handler.handle({ type: 'youtube.list', requestId: 'new-list', liveChatId: 'chat-1' }, monitor)).toMatchObject({ ok: true });
   expect(await handler.handle({ type: 'jev.evaluate', id: 'new' }, monitor)).toMatchObject({ ok: true });
-  expect(await hiddenAuthors.list(open.videoId)).toEqual([post.authorChannelId]);
+  expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([post.authorChannelId]);
   moderation.reset();
 });
 it('全削除後にworkerを再作成しても旧listは停止し、新明示resolveだけが再開できる', async () => {
@@ -192,10 +282,10 @@ it('全削除は停止制御の保存がreadbackできない場合も成功せ�
   const hiddenAuthors = createHiddenAuthors({ storage: deps.session, initialize: deps.initialize });
   const handler = createYouTubeHandler({ ...deps, hiddenAuthors });
   await handler.handle(open, popup);
-  await hiddenAuthors.add(open.videoId, 'UCabcdefghijklmnopqrstuv', 0);
+  await hiddenAuthors.add('UC0000000000000000000000', 'UCabcdefghijklmnopqrstuv', 0);
   deps.session.set.mockResolvedValueOnce(undefined);
   await expect(handler.clearHiddenData()).rejects.toThrow();
-  expect(await hiddenAuthors.list(open.videoId)).toEqual(['UCabcdefghijklmnopqrstuv']);
+  expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual(['UCabcdefghijklmnopqrstuv']);
   expect(await handler.handle({ type: 'youtube.list', requestId: 'old', liveChatId: 'chat-1' }, monitor)).toEqual(failure('aborted'));
 });
 it('全削除はinflight Jevをabortし、遅い応答とcached操作でも復活させない', async () => {
@@ -215,7 +305,7 @@ it('全削除はinflight Jevをabortし、遅い応答とcached操作でも復�
   response.resolve(new Response(JSON.stringify(apiResponse({ attack: 1 }))));
   expect(await pending).toEqual(failure('aborted'));
   expect(await handler.handle({ type: 'jev.evaluate', id: 'late' }, monitor)).toMatchObject({ ok: false });
-  expect(await hiddenAuthors.list(open.videoId)).toEqual([]);
+  expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([]);
   expect(fetcher).toHaveBeenCalledTimes(1); moderation.reset();
 });
 it.each(['youtube.resolve', 'jev.enable'] as const)('全削除前の%sのbinding snapshotが遅れても新世代のAPI/許可に入らない', async type => {
@@ -278,7 +368,7 @@ it.each([
     if (wait === 'target') deps.tabs.get.mockImplementationOnce(async id => {
       entered.resolve(); await release.promise; return { id, url: 'https://www.youtube.com/watch?v=abcdefghijk' };
     });
-    const youtubeFetch = vi.fn(async () => new Response(JSON.stringify({ items: [{ id: open.videoId, liveStreamingDetails: { activeLiveChatId: 'chat-1' } }] })));
+    const youtubeFetch = vi.fn(async () => new Response(JSON.stringify({ items: [{ id: open.videoId, snippet: { channelId: 'UC0000000000000000000000' }, liveStreamingDetails: { activeLiveChatId: 'chat-1' } }] })));
     const jevFetch = vi.fn(async () => new Response(JSON.stringify(apiResponse())));
     const moderation = createModeration({ client: createJevClient(jevFetch), readKey: async () => 'synthetic' });
     const handler = createYouTubeHandler({ ...deps, moderation, client: createYouTubeClient(youtubeFetch) });
@@ -373,8 +463,8 @@ it.each(['localKey', 'notBefore'] as const)('全削除後の明示newenableを�
   const handler = createYouTubeHandler({ ...deps, moderation, hiddenAuthors, readConfirmation: confirmation.read });
   try {
     await handler.handle(open, popup);
-    await hiddenAuthors.add(open.videoId, 'UCabcdefghijklmnopqrstuv', 0);
-    expect(await hiddenAuthors.list(open.videoId)).toEqual(['UCabcdefghijklmnopqrstuv']);
+    await hiddenAuthors.add('UC0000000000000000000000', 'UCabcdefghijklmnopqrstuv', 0);
+    expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual(['UCabcdefghijklmnopqrstuv']);
     const entered = deferred(); let reject!: (error: Error) => void;
     const pendingRead = new Promise<Record<string, unknown>>((_resolve, fail) => { reject = fail; });
     const storage = wait === 'localKey' ? local : deps.session;
@@ -389,7 +479,7 @@ it.each(['localKey', 'notBefore'] as const)('全削除後の明示newenableを�
     const oldEnable = handler.handle({ type: 'jev.enable' }, monitor);
     await entered.promise;
     await handler.clearHiddenData();
-    expect(await hiddenAuthors.list(open.videoId)).toEqual([]);
+    expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([]);
     expect(deps.runtime.sendMessage).toHaveBeenCalledTimes(2);
     expect(deps.runtime.sendMessage).toHaveBeenNthCalledWith(1, { type: 'hidden.clearing' });
     expect(deps.runtime.sendMessage).toHaveBeenNthCalledWith(2, { type: 'hidden.refresh' });
@@ -403,7 +493,7 @@ it.each(['localKey', 'notBefore'] as const)('全削除後の明示newenableを�
       .toMatchObject({ ok: true, value: { jev: 'evaluated' } });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(await enable.mock.results[0].value).toEqual({ ok: false, error: { code: 'aborted' } });
-    expect(await hiddenAuthors.list(open.videoId)).toEqual([]);
+    expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([]);
   } finally { moderation.reset(); vi.unstubAllGlobals(); vi.resetModules(); }
 });
 
@@ -474,7 +564,7 @@ it('遅い取得中の201件目は直列キューへ蓄積せず即時失敗す�
   await waiting.promise;
   const requests = Array.from({ length: 200 }, (_, i) => handler.handle({ type: 'youtube.resolve', requestId: `waiting-${i}`, videoId: open.videoId }, monitor));
   const result = await Promise.race([requests.at(-1), new Promise(resolve => setTimeout(() => resolve('blocked'), 20))]);
-  response.resolve({ ok: true, value: { liveChatId: 'chat-1' } }); await first; await Promise.all(requests);
+  response.resolve({ ok: true, value: { liveChatId: 'chat-1', broadcasterChannelId: 'UC0000000000000000000000' } }); await first; await Promise.all(requests);
   expect(result).toMatchObject({ ok: false });
 });
 it('観測ID期限切れ後の遅延評価は非表示登録しない（永続IDは保持）', async () => {
@@ -486,7 +576,7 @@ it('観測ID期限切れ後の遅延評価は非表示登録しない（永続ID
   const handler = createYouTubeHandler({ ...deps, moderation, hiddenAuthors });
   const author = 'UCabcdefghijklmnopqrstuv'; const existing = 'UCzyxwvutsrqponmlkjihgfe';
   await handler.handle(open, popup);
-  await hiddenAuthors.add(open.videoId, existing, 0);
+  await hiddenAuthors.add('UC0000000000000000000000', existing, 0);
   await handler.handle({ type: 'youtube.resolve', requestId: 'resolve', videoId: open.videoId }, monitor); advance(5000);
   deps.client.listMessages.mockResolvedValue({ ok: true, value: { messages: [{ ...chatPost('expiring'), authorChannelId: author }], nextPageToken: 'next', pollingIntervalMillis: 8000, ended: false } });
   await handler.handle({ type: 'youtube.list', requestId: 'list', liveChatId: 'chat-1' }, monitor);
@@ -494,7 +584,7 @@ it('観測ID期限切れ後の遅延評価は非表示登録しない（永続ID
   advance(60001);
   response.resolve({ ok: true, value: { id: 'expiring', authorChannelId: author, burst: 'confirmed', jev: 'disabled', malicious: true, reasons: ['burst'] } });
   await evaluation;
-  expect(await hiddenAuthors.list(open.videoId)).toEqual([existing]);
+  expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([existing]);
   moderation.reset();
 });
 it('公式取得とJev確定だけを配信別登録し、解除済みの同じ結果で再登録しない', async () => {
@@ -509,19 +599,19 @@ it('公式取得とJev確定だけを配信別登録し、解除済みの同じ�
   const author = 'UCabcdefghijklmnopqrstuv';
   deps.client.listMessages.mockResolvedValue({ ok: true, value: { messages: [{ ...chatPost('actual'), authorChannelId: author, authorDisplayName: 'みどり' }], nextPageToken: 'next', pollingIntervalMillis: 8000, ended: false } });
   await handler.handle({ type: 'youtube.list', requestId: 'r2', liveChatId: 'chat-1' }, monitor);
-  expect(await hiddenAuthors.list(open.videoId)).toEqual([]);
+  expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([]);
   await handler.handle({ type: 'jev.evaluate', id: 'actual' }, monitor);
-  expect(await hiddenAuthors.list(open.videoId)).toEqual([author]);
-  expect(await hiddenAuthors.listAuthors(open.videoId)).toEqual([{ authorChannelId: author, displayName: 'みどり' }]);
-  await hiddenAuthors.remove(open.videoId, author);
+  expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([author]);
+  expect(await hiddenAuthors.listAuthors('UC0000000000000000000000')).toEqual([{ authorChannelId: author, displayName: 'みどり' }]);
+  await hiddenAuthors.remove('UC0000000000000000000000', author);
   await handler.handle({ type: 'jev.evaluate', id: 'actual' }, monitor);
-  expect(await hiddenAuthors.list(open.videoId)).toEqual([]);
+  expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([]);
   advance(8000);
   deps.client.listMessages.mockResolvedValue({ ok: true, value: { messages: [{ ...chatPost('new', 9000), authorChannelId: author, authorDisplayName: 'みどりの庭' }], nextPageToken: 'next2', pollingIntervalMillis: 8000, ended: false } });
   await handler.handle({ type: 'youtube.list', requestId: 'r3', liveChatId: 'chat-1' }, monitor);
   await handler.handle({ type: 'jev.evaluate', id: 'new' }, monitor);
-  expect(await hiddenAuthors.list(open.videoId)).toEqual([author]);
-  expect(await hiddenAuthors.listAuthors(open.videoId)).toEqual([{ authorChannelId: author, displayName: 'みどりの庭' }]);
+  expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([author]);
+  expect(await hiddenAuthors.listAuthors('UC0000000000000000000000')).toEqual([{ authorChannelId: author, displayName: 'みどりの庭' }]);
 });
 it('遅い判定中に既取得の名前が変わっても登録には最新観測名を使い、古いcached判定は名前を戻さない', async () => {
   const { deps, advance } = setup();
@@ -543,14 +633,14 @@ it('遅い判定中に既取得の名前が変わっても登録には最新観�
   // A repeated message can carry a newly acquired name; identity/revision stay fixed.
   await list('old', 'みどりの小道');
   response.resolve(new Response(JSON.stringify(apiResponse({ attack: 1 })))); await evaluation;
-  expect(await hiddenAuthors.listAuthors(open.videoId)).toEqual([{ authorChannelId: author, displayName: 'みどりの小道' }]);
+  expect(await hiddenAuthors.listAuthors('UC0000000000000000000000')).toEqual([{ authorChannelId: author, displayName: 'みどりの小道' }]);
   await list('changed', 'みどりの森');
   await handler.handle({ type: 'jev.evaluate', id: 'old' }, monitor);
   await list('missing');
-  expect(await hiddenAuthors.listAuthors(open.videoId)).toEqual([{ authorChannelId: author, displayName: 'みどりの森' }]);
-  await hiddenAuthors.remove(open.videoId, author);
+  expect(await hiddenAuthors.listAuthors('UC0000000000000000000000')).toEqual([{ authorChannelId: author, displayName: 'みどりの森' }]);
+  await hiddenAuthors.remove('UC0000000000000000000000', author);
   await handler.handle({ type: 'jev.evaluate', id: 'old' }, monitor);
-  expect(await hiddenAuthors.listAuthors(open.videoId)).toEqual([]);
+  expect(await hiddenAuthors.listAuthors('UC0000000000000000000000')).toEqual([]);
   moderation.reset();
 });
 it('Jev未有効化でも取得済み10秒10件のローカル連投を直ちに非表示登録する', async () => {
@@ -565,9 +655,9 @@ it('Jev未有効化でも取得済み10秒10件のローカル連投を直ちに
   const author = 'UCabcdefghijklmnopqrstuv';
   deps.client.listMessages.mockResolvedValue({ ok: true, value: { messages: Array.from({ length: 10 }, (_, n) => ({ ...chatPost(`burst-${n}`, n * 1000), authorChannelId: author, authorDisplayName: 'さくら' })), nextPageToken: 'next', pollingIntervalMillis: 8000, ended: false } });
   await handler.handle({ type: 'youtube.list', requestId: 'r2', liveChatId: 'chat-1' }, monitor);
-  expect(await hiddenAuthors.list(open.videoId)).toEqual([author]);
+  expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([author]);
   expect(fetcher).not.toHaveBeenCalled();
-  expect(await hiddenAuthors.listAuthors(open.videoId)).toEqual([{ authorChannelId: author, displayName: 'さくら' }]);
+  expect(await hiddenAuthors.listAuthors('UC0000000000000000000000')).toEqual([{ authorChannelId: author, displayName: 'さくら' }]);
 });
 it('exact bindingだけがJevを有効化でき実list由来IDのみ評価、本文payloadは禁止', async () => {
   const { deps, advance } = setup();
@@ -606,7 +696,7 @@ it('stopCollection成功後はcancel未配送でも停止前の遅延listを観�
   const existingAuthor = 'UCabcdefghijklmnopqrstuv';
   const lateAuthor = 'UCzyxwvutsrqponmlkjihgfe';
   await handler.handle(open, popup);
-  await hiddenAuthors.add(open.videoId, existingAuthor, 0, () => true, 'みどり');
+  await hiddenAuthors.add('UC0000000000000000000000', existingAuthor, 0, () => true, 'みどり');
   await handler.handle({ type: 'youtube.resolve', requestId: 'resolve-before-stop', videoId: open.videoId }, monitor);
   advance(5000);
   const waiting = deferred();
@@ -623,8 +713,8 @@ it('stopCollection成功後はcancel未配送でも停止前の遅延listを観�
     nextPageToken: 'next', pollingIntervalMillis: 8000, ended: false,
   } });
   const result = await request;
-  expect(await hiddenAuthors.list(open.videoId)).toEqual([existingAuthor]);
-  expect(await hiddenAuthors.listAuthors(open.videoId)).toEqual([{ authorChannelId: existingAuthor, displayName: 'みどり' }]);
+  expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([existingAuthor]);
+  expect(await hiddenAuthors.listAuthors('UC0000000000000000000000')).toEqual([{ authorChannelId: existingAuthor, displayName: 'みどり' }]);
   expect(observe).not.toHaveBeenCalled();
   expect(await moderation.evaluate('late-burst-9')).toEqual({ ok: false, error: { code: 'forbidden' } });
   expect(result).toEqual(failure('aborted'));
@@ -646,10 +736,10 @@ it.each(['stop', 'credentials', 'target', 'remove'] as const)('Jev遅延中の%s
   if (action === 'stop') await handler.handle({ type: 'jev.stopCollection' }, monitor);
   if (action === 'credentials') await handler.credentialsChanged();
   if (action === 'target') { deps.tabs.get.mockImplementation(async id => ({ id, url: id === 9 ? 'https://www.youtube.com/watch?v=zyxwvutsrqp' : monitor.url })); await handler.targetChanged(9, 'https://www.youtube.com/watch?v=zyxwvutsrqp'); }
-  if (action === 'remove') await hiddenAuthors.remove(open.videoId, author);
+  if (action === 'remove') await hiddenAuthors.remove('UC0000000000000000000000', author);
   response.resolve(new Response(JSON.stringify(apiResponse({ attack: 1 })))); await evaluation;
-  expect(await hiddenAuthors.list(open.videoId)).toEqual([]);
-  expect(await hiddenAuthors.list('zyxwvutsrqp')).toEqual([]);
+  expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([]);
+  expect(await hiddenAuthors.list('UC1111111111111111111111')).toEqual([]);
 });
 
 it.each([
@@ -808,7 +898,7 @@ it('popupの対象tabを照合してキーなしbindingを作り、monitorだけ
   expect(await handler.handle(open, popup)).toMatchObject({ ok: true });
   expect(await handler.handle({ type: 'youtube.status' }, monitor)).toEqual({ ok: true, value: { videoId: 'abcdefghijk', targetTabId: 9, credentialsAvailable: true } });
   expect(await handler.handle({ type: 'youtube.resolve', requestId: 'request-1', videoId: 'abcdefghijk' }, monitor))
-    .toEqual({ ok: true, value: { liveChatId: 'chat-1' } });
+    .toEqual({ ok: true, value: { liveChatId: 'chat-1', broadcasterChannelId: 'UC0000000000000000000000' } });
   expect(deps.client.resolveVideo).toHaveBeenCalledWith('abcdefghijk', 'fixture-key', expect.any(AbortSignal));
   advance(5000);
   expect(await handler.handle({ type: 'youtube.list', requestId: 'request-2', liveChatId: 'chat-1' }, monitor)).toMatchObject({ ok: true });

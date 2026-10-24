@@ -33,7 +33,7 @@ test('MV3 background: 旧runtime/旧版/読取・保存失敗は通信0、Jev有
     await context.route('https://www.googleapis.com/youtube/v3/**', route => {
       youtubeCalls++;
       return route.fulfill({ json: route.request().url().includes('/videos?')
-        ? { items: [{ id: 'abcdefghijk', liveStreamingDetails: { activeLiveChatId: 'fixture-chat' } }] }
+        ? { items: [{ id: 'abcdefghijk', snippet: { channelId: 'UC0000000000000000000000' }, liveStreamingDetails: { activeLiveChatId: 'fixture-chat' } }] }
         : { nextPageToken: 'next', pollingIntervalMillis: 5000, items: [{ id: 'pending-post', snippet: {
           type: 'textMessageEvent', hasDisplayContent: true, displayMessage: '未送信本文fixture', publishedAt: new Date().toISOString(),
         }, authorDetails: { channelId: 'UCabcdefghijklmnopqrstuv' } }] } });
@@ -60,7 +60,7 @@ test('MV3 background: 旧runtime/旧版/読取・保存失敗は通信0、Jev有
     }, target.id);
     const monitor = await monitorOpened; await monitor.goto(`chrome-extension://${id}/monitor.html`);
     await expect(monitor.getByRole('button', { name: '取得を開始', exact: true })).toBeEnabled();
-    for (const value of [undefined, { version: 1 }, { version: 0 }, { version: '2' }]) {
+    for (const value of [undefined, { version: 2 }, { version: 1 }, { version: 0 }, { version: '3' }]) {
       if (value !== undefined) {
         await monitor.evaluate(() => {
           const send = chrome.runtime.sendMessage.bind(chrome.runtime);

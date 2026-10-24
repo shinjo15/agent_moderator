@@ -2,6 +2,28 @@ import { expect, it, vi } from 'vitest';
 import { createHiddenAuthors } from '../src/hidden-authors/store';
 import type { MessageSender } from '../src/extension-runtime';
 import { createHiddenAuthorHandler } from '../src/hidden-authors/handler';
+const broadcasterChannelId = 'UC0000000000000000000000';
+
+it('scopeはtrusted bindingからのみ決定し、未解決/不正/偽装scope/別動画を拒否する', async () => {
+  const videoId = 'abcdefghijk'; const channel = 'UC0000000000000000000000'; const author = 'UCabcdefghijklmnopqrstuv';
+  const values: Record<string, unknown> = {};
+  const storage = { get: async (keys: string[]) => Object.fromEntries(keys.map(key => [key, values[key]])),
+    set: async (data: Record<string, unknown>) => { Object.assign(values, structuredClone(data)); } };
+  const store = createHiddenAuthors({ storage, initialize: async () => {} }); await store.add(channel, author, 0);
+  const binding: Record<string, unknown> = { monitorTabId: 10, targetTabId: 9, videoId };
+  values['youtube.monitorBinding'] = binding;
+  const handler = createHiddenAuthorHandler({ store, session: storage, tabs: { get: async () => ({ url: `https://www.youtube.com/watch?v=${videoId}` }) },
+    runtime: { id: 'test', getURL: p => `chrome-extension://test/${p}` } });
+  const sender = { id: 'test', url: 'chrome-extension://test/monitor.html', tab: { id: 10 } };
+  expect(await handler.handle({ type: 'hidden.list', videoId }, sender)).toMatchObject({ ok: false });
+  binding.broadcasterChannelId = 'invalid';
+  expect(await handler.handle({ type: 'hidden.list', videoId }, sender)).toMatchObject({ ok: false });
+  binding.broadcasterChannelId = channel; binding.liveChatId = 'chat';
+  expect(await handler.handle({ type: 'hidden.list', videoId }, sender)).toMatchObject({ ok: true, ids: [author] });
+  expect(await handler.handle({ type: 'hidden.list', videoId, broadcasterChannelId: 'UC1111111111111111111111' }, sender)).toEqual({ ok: false });
+  expect(await handler.handle({ type: 'hidden.list', videoId: 'zyxwvutsrqp' }, sender)).toEqual({ ok: false });
+  expect(await handler.handle({ type: 'hidden.list', videoId }, { ...sender, tab: { id: 11 } })).toEqual({ ok: false });
+});
 
 it('全削除はexact optionsの単一payloadだけ許可し、失敗/秘密を成功応答にしない', async () => {
   const clearAll = vi.fn(async () => {});
@@ -28,7 +50,7 @@ it('全削除前に受信しbinding読取待ちだった個別解除は空revisi
   const store = createHiddenAuthors({ storage, initialize: async () => {} });
   let release!: () => void; let enter!: () => void;
   const gate = new Promise<void>(done => { release = done; }); const entered = new Promise<void>(done => { enter = done; });
-  const handler = createHiddenAuthorHandler({ store, session: { get: async () => { enter(); await gate; return { 'youtube.monitorBinding': { monitorTabId: 10, targetTabId: 9, videoId } }; } },
+  const handler = createHiddenAuthorHandler({ store, session: { get: async () => { enter(); await gate; return { 'youtube.monitorBinding': { monitorTabId: 10, targetTabId: 9, videoId, broadcasterChannelId, liveChatId: 'chat' } }; } },
     tabs: { get: async () => ({ url: `https://www.youtube.com/watch?v=${videoId}` }) }, runtime: { id: 'test', getURL: p => `chrome-extension://test/${p}` }, clearAll: () => store.clearAll() });
   const stale = handler.handle({ type: 'hidden.remove', videoId, authorChannelId: author }, { id: 'test', url: 'chrome-extension://test/monitor.html', tab: { id: 10 } });
   await entered; await store.clearAll(); release(); await stale;
@@ -44,7 +66,7 @@ it('削除中に受信し認可が削除完了後に返る個別解除も空項�
   const storage = { get: async (keys: string[] | null) => keys === null ? structuredClone(values) : Object.fromEntries(keys.map(k => [k, values[k]])),
     set: async (v: Record<string, unknown>) => { Object.assign(values, v); }, remove: async (keys: string[]) => { removing(); await removalGate; for (const k of keys) delete values[k]; } };
   const store = createHiddenAuthors({ storage, initialize: async () => {} });
-  const handler = createHiddenAuthorHandler({ store, session: { get: async () => { entered(); await authGate; return { 'youtube.monitorBinding': { monitorTabId: 10, targetTabId: 9, videoId } }; } },
+  const handler = createHiddenAuthorHandler({ store, session: { get: async () => { entered(); await authGate; return { 'youtube.monitorBinding': { monitorTabId: 10, targetTabId: 9, videoId, broadcasterChannelId, liveChatId: 'chat' } }; } },
     tabs: { get: async () => ({ url: `https://www.youtube.com/watch?v=${videoId}` }) }, runtime: { id: 'test', getURL: p => `chrome-extension://test/${p}` } });
   const clear = store.clearAll(); await removingStarted;
   const stale = handler.handle({ type: 'hidden.remove', videoId, authorChannelId: author }, { id: 'test', url: 'chrome-extension://test/monitor.html', tab: { id: 10 } });
@@ -56,8 +78,8 @@ it('削除完了後に古い一覧の解除ボタンを送っても空revision�
   const videoId = 'abcdefghijk'; const author = 'UCabcdefghijklmnopqrstuv'; const values: Record<string, unknown> = {};
   const storage = { get: async (keys: string[] | null) => keys === null ? structuredClone(values) : Object.fromEntries(keys.map(k => [k, values[k]])),
     set: async (v: Record<string, unknown>) => { Object.assign(values, v); }, remove: async (keys: string[]) => { for (const k of keys) delete values[k]; } };
-  const store = createHiddenAuthors({ storage, initialize: async () => {} }); await store.add(videoId, author, 0); await store.clearAll();
-  const handler = createHiddenAuthorHandler({ store, session: { get: async () => ({ 'youtube.monitorBinding': { monitorTabId: 10, targetTabId: 9, videoId } }) },
+  const store = createHiddenAuthors({ storage, initialize: async () => {} }); await store.add(broadcasterChannelId, author, 0); await store.clearAll();
+  const handler = createHiddenAuthorHandler({ store, session: { get: async () => ({ 'youtube.monitorBinding': { monitorTabId: 10, targetTabId: 9, videoId, broadcasterChannelId, liveChatId: 'chat' } }) },
     tabs: { get: async () => ({ url: `https://www.youtube.com/watch?v=${videoId}` }) }, runtime: { id: 'test', getURL: p => `chrome-extension://test/${p}` } });
   expect(await handler.handle({ type: 'hidden.remove', videoId, authorChannelId: author }, { id: 'test', url: 'chrome-extension://test/monitor.html', tab: { id: 10 } }))
     .toEqual({ ok: true, videoId, ids: [], authors: [] });
@@ -66,10 +88,10 @@ it('削除完了後に古い一覧の解除ボタンを送っても空revision�
 
 it('binding一致monitorだけへ一覧を返し旧contentと名前偽造writeを拒否する', async () => {
   const videoId = 'abcdefghijk'; const author = 'UCabcdefghijklmnopqrstuv';
-  const values: Record<string, unknown> = { 'youtube.monitorBinding': { monitorTabId: 10, targetTabId: 9, videoId } };
+  const values: Record<string, unknown> = { 'youtube.monitorBinding': { monitorTabId: 10, targetTabId: 9, videoId, broadcasterChannelId, liveChatId: 'chat' } };
   const storage = { get: async (keys: string[]) => Object.fromEntries(keys.map(k => [k, values[k]])), set: async (v: Record<string, unknown>) => { Object.assign(values, v); } };
   const store = createHiddenAuthors({ storage, initialize: async () => {} });
-  await store.add(videoId, author, 0, () => true, 'みどり');
+  await store.add(broadcasterChannelId, author, 0, () => true, 'みどり');
   const handler = createHiddenAuthorHandler({ store, session: storage, tabs: { get: async () => ({ url: `https://www.youtube.com/watch?v=${videoId}` }) },
     runtime: { id: 'test', getURL: p => `chrome-extension://test/${p}` } });
   const monitor = { id: 'test', url: 'chrome-extension://test/monitor.html', tab: { id: 10 } };
@@ -93,7 +115,7 @@ it('旧contentのID一覧取得を含め外部・他URL・別video・解除paylo
   const storage = { get: async (keys: string[]) => Object.fromEntries(keys.map(k => [k, values[k]])), set: async (v: Record<string, unknown>) => { Object.assign(values,v); } };
   const store = createHiddenAuthors({ storage, initialize: async () => {} });
   const author = 'UCabcdefghijklmnopqrstuv'; const videoId = 'abcdefghijk';
-  await store.add(videoId, author, 0);
+  await store.add(broadcasterChannelId, author, 0);
   const tabs = { get: vi.fn(async () => ({ url: `https://www.youtube.com/watch?v=${videoId}` })) };
   const handler = module.createHiddenAuthorHandler({ store, tabs, session: storage, runtime: { id:'test', getURL:(p:string)=>`chrome-extension://test/${p}` } });
   const sender = { id:'test', url:'https://www.youtube.com/live_chat?continuation=opaque', tab:{id:9}, frameId:1 };

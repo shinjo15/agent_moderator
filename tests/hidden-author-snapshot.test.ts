@@ -2,6 +2,17 @@ import { expect, it } from 'vitest';
 import { createHiddenAuthorSnapshot } from '../src/hidden-authors/snapshot';
 const video = 'abcdefghijk'; const author = 'UCabcdefghijklmnopqrstuv';
 const snapshot = (ids = [author]) => ({ ok: true, videoId: video, ids });
+
+it('配信者未解決は空readyにせず表示保留し、確定後の保存一覧だけで表示を許可する', async () => {
+  let result: unknown = { ok: false, code: 'scopeUnresolved' };
+  const view = createHiddenAuthorSnapshot({ read: async () => result, changed() {} });
+  await view.setVideo(video);
+  expect(view.state().status).toBe('loading'); expect(view.visible('other')).toBe(false);
+  result = snapshot(); await view.refresh();
+  expect(view.state().status).toBe('ready'); expect(view.visible(author)).toBe(false);
+  result = { ok: false, code: 'scopeUnresolved' }; await view.poll();
+  expect(view.state().status).toBe('loading'); expect(view.visible('other')).toBe(false);
+});
 function deferred() { let resolve!: (value: unknown) => void; const promise = new Promise<unknown>(done => { resolve = done; }); return { promise, resolve }; }
 it('初回読取前と読取失敗時は本文を表示せず、再試行で保存IDを反映する', async () => {
   const first = deferred(); let result: unknown = first.promise;

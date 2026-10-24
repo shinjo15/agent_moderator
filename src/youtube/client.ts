@@ -1,4 +1,4 @@
-import { failure, validDisplayName, validProfileImageUrl, type ChatMessage, type ChatPage, type Result, type YouTubeClient } from './contracts';
+import { failure, validChannelId, validDisplayName, validProfileImageUrl, type ChatMessage, type ChatPage, type ResolvedVideo, type Result, type YouTubeClient } from './contracts';
 import { publicationTime } from './published-at';
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -9,7 +9,7 @@ function nonempty(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function resolveVideo(body: unknown, videoId: string): Result<{ liveChatId: string }> {
+function resolveVideo(body: unknown, videoId: string): Result<ResolvedVideo> {
   if (!record(body) || !Array.isArray(body.items)) return failure('invalidResponse');
   if (body.items.length === 0) return failure('notFound');
   if (body.items.length !== 1 || !record(body.items[0]) || body.items[0].id !== videoId) return failure('invalidResponse');
@@ -21,7 +21,11 @@ function resolveVideo(body: unknown, videoId: string): Result<{ liveChatId: stri
   }
   if (details.activeLiveChatId !== undefined && !nonempty(details.activeLiveChatId)) return failure('invalidResponse');
   if (details.actualEndTime !== undefined) return failure('ended');
-  if (nonempty(details.activeLiveChatId)) return { ok: true, value: { liveChatId: details.activeLiveChatId } };
+  if (nonempty(details.activeLiveChatId)) {
+    const snippet = body.items[0].snippet;
+    if (!record(snippet) || !validChannelId(snippet.channelId)) return failure('invalidResponse');
+    return { ok: true, value: { liveChatId: details.activeLiveChatId, broadcasterChannelId: snippet.channelId } };
+  }
   return failure(details.actualStartTime !== undefined ? 'chatDisabled' : 'notLive');
 }
 
@@ -96,7 +100,7 @@ export function createYouTubeClient(fetcher: typeof fetch = fetch): YouTubeClien
   return {
     async resolveVideo(videoId: string, apiKey: string, signal: AbortSignal) {
       if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) return failure('invalidInput');
-      return request('videos', { id: videoId, part: 'liveStreamingDetails' }, apiKey, signal, body => resolveVideo(body, videoId));
+      return request('videos', { id: videoId, part: 'snippet,liveStreamingDetails' }, apiKey, signal, body => resolveVideo(body, videoId));
     },
     async listMessages(liveChatId, pageToken, apiKey, signal): Promise<Result<ChatPage>> {
       if (!nonempty(liveChatId) || (pageToken !== undefined && !nonempty(pageToken))) return failure('invalidInput');

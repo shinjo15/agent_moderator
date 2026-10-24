@@ -17,8 +17,9 @@ export function createHiddenAuthorSnapshot({ read, changed }: {
     if (!selected) return;
     reading = current;
     try {
-      const value = await read(selected) as { ok?: boolean; videoId?: unknown; ids?: unknown; authors?: unknown };
+      const value = await read(selected) as { ok?: boolean; code?: unknown; videoId?: unknown; ids?: unknown; authors?: unknown };
       if (current !== generation) return;
+      if (value?.ok === false && value.code === 'scopeUnresolved') { publish({ status: 'loading', authors: [] }); return; }
       if (value?.ok !== true || value.videoId !== selected || !Array.isArray(value.ids) || !value.ids.every(validAuthor)) throw new Error('Invalid snapshot');
       const ids: string[] = value.ids;
       const authors: HiddenAuthor[] = ids.map(authorChannelId => ({ authorChannelId }));

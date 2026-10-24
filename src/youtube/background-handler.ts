@@ -1,9 +1,9 @@
 import type { MessageSender } from '../extension-runtime';
-import { failure, validDisplayName, type ChatPage, type Result, type YouTubeClient } from './contracts';
+import { failure, validDisplayName, type ChatPage, type ResolvedVideo, type Result, type YouTubeClient } from './contracts';
 import { DEFAULT_INTERVAL_MILLIS } from './monitor';
 import { videoIdFromUrl } from './video-id';
 import type { createModeration } from '../jev/moderation';
-import { validAuthor, type createHiddenAuthors } from '../hidden-authors/store';
+import { validAuthor, validVideo, type createHiddenAuthors } from '../hidden-authors/store';
 import { createBoundedQueue, createTransientMap } from '../retention';
 
 export interface SessionStorage {
@@ -22,7 +22,7 @@ export interface ExtensionWindows {
   get(id: number): Promise<{ type?: string }>;
   update(id: number, options: { focused: boolean }): Promise<unknown>;
 }
-type Binding = { monitorTabId: number; targetTabId: number; videoId: string; liveChatId?: string };
+type Binding = { monitorTabId: number; targetTabId: number; videoId: string; liveChatId?: string; broadcasterChannelId?: string };
 const BINDING = 'youtube.monitorBinding';
 const COOLDOWN = 'youtube.cooldown';
 const PAUSED = 'hidden.collectionPaused';
@@ -53,7 +53,7 @@ export function createYouTubeHandler({ session, tabs, windows, runtime, client, 
   let deletionEpoch = 0;
   let deleting = false;
   let collectionPaused = false;
-  type Observation = { video: string; author: string; revision: number; generation: number; displayName?: string; nameSequence: number };
+  type Observation = { video: string; channel: string; author: string; revision: number; generation: number; displayName?: string; nameSequence: number };
   const observations = createTransientMap<Observation>({ now });
   let nameSequence = 0;
   function latestDisplayName(observed: Observation) {
@@ -74,7 +74,7 @@ export function createYouTubeHandler({ session, tabs, windows, runtime, client, 
   async function binding(): Promise<Binding | undefined> {
     const value = (await session.get([BINDING]))[BINDING];
     return object(value) && Number.isSafeInteger(value.monitorTabId) && Number.isSafeInteger(value.targetTabId)
-      && text(value.videoId) ? value as Binding : undefined;
+      && validVideo(value.videoId) ? value as Binding : undefined;
   }
   async function notify(message: unknown) { try { await runtime.sendMessage(message); } catch { /* No open monitor. */ } }
   async function clearHiddenData() {
@@ -179,16 +179,20 @@ export function createYouTubeHandler({ session, tabs, windows, runtime, client, 
           monitorTabId = created.tabs?.[0]?.id;
         }
         if (monitorTabId === undefined || !Number.isSafeInteger(monitorTabId) || monitorTabId < 0) return failure('network');
-        await session.set({ [BINDING]: { monitorTabId, targetTabId: message.tabId, videoId: message.videoId } });
+        const savedChannel = await hiddenAuthors?.channelForVideo(message.videoId);
+        if (!currentEpoch()) return failure('aborted');
+        const nextBinding = { monitorTabId, targetTabId: message.tabId as number, videoId: message.videoId,
+          ...(savedChannel === undefined ? {} : { broadcasterChannelId: savedChannel }) };
+        await session.set({ [BINDING]: nextBinding });
         bindingGeneration++;
         moderation?.reset();
         if (previous?.monitorTabId === monitorTabId) await notify({ type: 'youtube.targetChanged' });
-        activeBinding = { generation: bindingGeneration, binding: { monitorTabId, targetTabId: message.tabId as number, videoId: message.videoId } };
+        activeBinding = { generation: bindingGeneration, binding: nextBinding };
         await tabs.update(monitorTabId, { url: runtime.getURL('monitor.html'), active: true });
         if (reuseWindowId !== undefined) await windows.update(reuseWindowId, { focused: true });
         return { ok: true, value: { monitorTabId } };
       });
-      const selectedGeneration = bindingGeneration;
+      let selectedGeneration = bindingGeneration;
       const selected = await binding();
       if (!currentEpoch()) return failure('aborted');
       if (!selected || tabId(sender) !== selected.monitorTabId) return failure('forbidden');
@@ -220,7 +224,7 @@ export function createYouTubeHandler({ session, tabs, windows, runtime, client, 
             await stateExclusive(async () => {
               if (!currentEpoch() || selectedGeneration !== bindingGeneration || collection !== collectionGeneration
                 || videoIdFromUrl((await tabs.get(selected.targetTabId)).url) !== selected.videoId) return;
-              await hiddenAuthors.add(observed.video, observed.author, observed.revision,
+              await hiddenAuthors.add(observed.channel, observed.author, observed.revision,
                 () => currentEpoch() && selectedGeneration === bindingGeneration && collection === collectionGeneration && observations.get(message.id as string) === observed,
                 latestDisplayName(observed));
             });
@@ -238,7 +242,7 @@ export function createYouTubeHandler({ session, tabs, windows, runtime, client, 
         if (message.videoId !== selected.videoId) return failure('invalidInput');
       } else if (message.type === 'youtube.list') {
         if (collectionPaused) return failure('aborted');
-        if (!text(message.liveChatId) || message.liveChatId !== selected.liveChatId
+        if (!validAuthor(selected.broadcasterChannelId) || !text(message.liveChatId) || message.liveChatId !== selected.liveChatId
           || (message.pageToken !== undefined && !text(message.pageToken))) return failure('invalidInput');
       } else return failure('forbidden');
       return await exclusive(async () => {
@@ -247,6 +251,20 @@ export function createYouTubeHandler({ session, tabs, windows, runtime, client, 
         const current = await binding();
         if (selectedGeneration !== bindingGeneration || !current || current.monitorTabId !== selected.monitorTabId || current.videoId !== selected.videoId
           || videoIdFromUrl((await tabs.get(current.targetTabId)).url) !== current.videoId) return failure('invalidInput');
+        if (message.type === 'youtube.resolve') {
+          const invalidated = await stateExclusive(async () => {
+            if (!currentEpoch() || staleCollection() || selectedGeneration !== bindingGeneration) return false;
+            selectedGeneration = ++bindingGeneration;
+            observations.clear();
+            const unresolved = { monitorTabId: current.monitorTabId, targetTabId: current.targetTabId, videoId: current.videoId };
+            activeBinding = { generation: selectedGeneration, binding: unresolved };
+            await session.set({ [BINDING]: unresolved });
+            await hiddenAuthors?.forgetVideo(current.videoId, () => currentEpoch() && selectedGeneration === bindingGeneration && !staleCollection());
+            await notify({ type: 'hidden.scopeChanged' });
+            return true;
+          });
+          if (!invalidated || !currentEpoch() || staleCollection() || selectedGeneration !== bindingGeneration) return failure('aborted');
+        } else if (!validAuthor(current.broadcasterChannelId) || current.liveChatId !== message.liveChatId) return failure('invalidInput');
         const generation = credentialGeneration;
         const confirmed = await readConfirmation();
         if (!currentEpoch() || staleCollection()) return failure('aborted');
@@ -270,7 +288,7 @@ export function createYouTubeHandler({ session, tabs, windows, runtime, client, 
         inflight = { requestId: message.requestId as string, controller, binding: current };
         if (cancelled.has(inflight.requestId) || generation !== credentialGeneration || selectedGeneration !== bindingGeneration) controller.abort();
         try {
-          const result: Result<{ liveChatId: string } | ChatPage> = message.type === 'youtube.resolve'
+          const result: Result<ResolvedVideo | ChatPage> = message.type === 'youtube.resolve'
             ? await client.resolveVideo(current.videoId, key, controller.signal)
             : await client.listMessages(current.liveChatId!, message.pageToken as string | undefined, key, controller.signal);
           const nextInterval = result.ok && 'pollingIntervalMillis' in result.value ? Math.max(DEFAULT_INTERVAL_MILLIS, result.value.pollingIntervalMillis) : interval;
@@ -285,7 +303,16 @@ export function createYouTubeHandler({ session, tabs, windows, runtime, client, 
             if (!currentEpoch() || controller.signal.aborted || selectedGeneration !== bindingGeneration || !latest
               || latest.monitorTabId !== current.monitorTabId || latest.targetTabId !== current.targetTabId
               || latest.videoId !== current.videoId) return failure('aborted');
-            if (result.ok && 'liveChatId' in result.value) await session.set({ [BINDING]: { ...latest, liveChatId: result.value.liveChatId } });
+            if (result.ok && 'liveChatId' in result.value) {
+              if (!validAuthor(result.value.broadcasterChannelId)) return failure('invalidResponse');
+              await hiddenAuthors?.migrate(current.videoId, result.value.broadcasterChannelId,
+                () => currentEpoch() && !controller.signal.aborted && selectedGeneration === bindingGeneration && !staleCollection());
+              await hiddenAuthors?.rememberVideo(current.videoId, result.value.broadcasterChannelId,
+                () => currentEpoch() && !controller.signal.aborted && selectedGeneration === bindingGeneration && !staleCollection());
+              if (!currentEpoch() || controller.signal.aborted || selectedGeneration !== bindingGeneration || staleCollection()) return failure('aborted');
+              await session.set({ [BINDING]: { ...latest, liveChatId: result.value.liveChatId, broadcasterChannelId: result.value.broadcasterChannelId } });
+              await notify({ type: 'hidden.scopeChanged' });
+            }
             if (!currentEpoch() || controller.signal.aborted || selectedGeneration !== bindingGeneration || generation !== credentialGeneration) return failure('aborted');
             if (result.ok && 'liveChatId' in result.value) {
               await session.set({ [PAUSED]: false });
@@ -294,17 +321,17 @@ export function createYouTubeHandler({ session, tabs, windows, runtime, client, 
             }
             if (result.ok && 'messages' in result.value) {
               const collection = selectedCollection;
-              if (collection !== collectionGeneration) return failure('aborted');
+              if (collection !== collectionGeneration || !validAuthor(current.broadcasterChannelId)) return failure('aborted');
               if (hiddenAuthors) for (const post of result.value.messages) {
                 if (validAuthor(post.authorChannelId) && !observations.has(post.id)) observations.set(post.id, {
-                  video: current.videoId, author: post.authorChannelId, revision: await hiddenAuthors.revision(current.videoId, post.authorChannelId), generation: collection,
+                  video: current.videoId, channel: current.broadcasterChannelId, author: post.authorChannelId, revision: await hiddenAuthors.revision(current.broadcasterChannelId, post.authorChannelId), generation: collection,
                   nameSequence: 0,
                 });
                 const observed = observations.get(post.id);
                 if (observed && observed.author === post.authorChannelId && observed.video === current.videoId
                   && observed.generation === collection && validDisplayName(post.authorDisplayName)) {
                   observed.displayName = post.authorDisplayName; observed.nameSequence = ++nameSequence;
-                  await hiddenAuthors.updateDisplayName(observed.video, observed.author, observed.revision, post.authorDisplayName,
+                  await hiddenAuthors.updateDisplayName(observed.channel, observed.author, observed.revision, post.authorDisplayName,
                     () => currentEpoch() && !controller.signal.aborted && selectedGeneration === bindingGeneration && collection === collectionGeneration
                       && observations.get(post.id) === observed && observed.generation === collection);
                 }
@@ -313,7 +340,7 @@ export function createYouTubeHandler({ session, tabs, windows, runtime, client, 
               const bursts = moderation?.observe(result.value.messages) ?? [];
               if (hiddenAuthors) for (const post of bursts) {
                 const observed = observations.get(post.id);
-                if (observed) await hiddenAuthors.add(observed.video, observed.author, observed.revision,
+                if (observed) await hiddenAuthors.add(observed.channel, observed.author, observed.revision,
                   () => currentEpoch() && !controller.signal.aborted && selectedGeneration === bindingGeneration && collection === collectionGeneration && observations.get(post.id) === observed,
                   latestDisplayName(observed));
               }

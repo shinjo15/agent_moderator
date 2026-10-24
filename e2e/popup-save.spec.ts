@@ -125,10 +125,10 @@ test('実action popup内の設定保存・sender認可・readback・再起動後
       .some(context => context.contextType === 'POPUP' && context.documentUrl === chrome.runtime.getURL('options.html')));
     expect(diagnostics).toEqual({ isPopup: true, documentUrlMatches: true, uiSaved: true, getValid: true, saveValid: true, credentialsValid: true, secretDenied: true });
     expect(metadataMatches).toBe(true); expect(popupContextMatches).toBe(true);
-    expect(await evaluate("chrome.runtime.sendMessage({type:'confirmation.get'})")).toEqual({ ok: true, value: { confirmed: false, version: 2 } });
+    expect(await evaluate("chrome.runtime.sendMessage({type:'confirmation.get'})")).toEqual({ ok: true, value: { confirmed: false, version: 3 } });
     await evaluate("document.querySelector('input[type=checkbox]').click(); Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='同意を保存').click()");
     await expect.poll(() => evaluate("document.querySelector('[data-testid=confirmation-status]').textContent")).toContain('同意済み');
-    expect(await evaluate("chrome.runtime.sendMessage({type:'confirmation.get'})")).toEqual({ ok: true, value: { confirmed: true, version: 2 } });
+    expect(await evaluate("chrome.runtime.sendMessage({type:'confirmation.get'})")).toEqual({ ok: true, value: { confirmed: true, version: 3 } });
     for (const [choice, threshold] of [['high', 0.65], ['medium', 0.8], ['low', 0.9], ['custom', 0], ['custom', 1], ['custom', 0.731]] as const) {
       await evaluate(`document.querySelector('select').value=${JSON.stringify(choice)}; document.querySelector('select').dispatchEvent(new Event('change'));
         ${choice === 'custom' ? `document.querySelector('#filter-threshold').value=${JSON.stringify(String(threshold))}; document.querySelector('#filter-threshold').dispatchEvent(new Event('input'));` : ''}
