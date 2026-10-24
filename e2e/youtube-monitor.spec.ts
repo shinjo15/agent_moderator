@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { confirmUsage } from './fixtures/confirm-usage';
+import { apiResponse } from '../tests/fixtures/jev';
 
 type ChromeWindow = { id?: number; type?: string; left?: number; top?: number; width?: number; height?: number; state?: string };
 declare const chrome: {
@@ -10,6 +11,105 @@ declare const chrome: {
   tabs: { create(options: { url: string; active: boolean }): Promise<unknown> };
   runtime: { sendMessage(message: unknown): Promise<unknown> };
 };
+
+test('production MV3: 実activeTab grantとonUpdatedで親ライブだけ追従し停止とorigin失効を守る', async () => {
+  test.setTimeout(120000);
+  const profile = await mkdtemp(join(tmpdir(), 'agent-moderator-follow-parent-'));
+  const extension = resolve('dist');
+  const context = await chromium.launchPersistentContext(profile, { channel: 'chromium', headless: true,
+    args: ['--enable-unsafe-extension-debugging', `--disable-extensions-except=${extension}`, `--load-extension=${extension}`] });
+  try {
+    const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
+    const id = new URL(worker.url()).hostname;
+    const resolved: string[] = [];
+    const pages: { chat: string; token: string | null; time: number }[] = [];
+    let releaseOld: (() => void) | undefined;
+    let jevCalls = 0;
+    await context.route('https://api.typesafe.ai/v1/systemone', async route => {
+      jevCalls++;
+      await route.fulfill({ status: 401, json: apiResponse() });
+    });
+    await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>親タブfixture</title>' }));
+    await context.route('https://example.com/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>対象外fixture</title>' }));
+    await context.route('https://www.googleapis.com/youtube/v3/**', async route => {
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith('/videos')) {
+        const video = url.searchParams.get('id')!; resolved.push(video);
+        await route.fulfill({ json: { items: [{ id: video, snippet: { channelId: video === 'abcdefghijk' ? 'UC0000000000000000000000' : 'UC1111111111111111111111' },
+          liveStreamingDetails: { activeLiveChatId: `chat-${video}` } }] } });
+      } else {
+        const chat = url.searchParams.get('liveChatId')!;
+        pages.push({ chat, token: url.searchParams.get('pageToken'), time: Date.now() });
+        if (chat === 'chat-abcdefghijk' && pages.filter(page => page.chat === chat).length === 2) {
+          await new Promise<void>(resolve => { releaseOld = resolve; });
+        }
+        await route.fulfill({ json: { nextPageToken: `next-${pages.length}`, pollingIntervalMillis: 5000, items: [{ id: `post-${pages.length}`,
+          snippet: { type: 'textMessageEvent', hasDisplayContent: true, displayMessage: chat, publishedAt: new Date().toISOString() }, authorDetails: { channelId: 'UCabcdefghijklmnopqrstuv' } }] } }).catch(() => {});
+      }
+    });
+    const options = await context.newPage(); await options.goto(`chrome-extension://${id}/options.html`);
+    await confirmUsage(options);
+    await options.getByLabel('YouTube APIキー').fill('synthetic-follow');
+    await options.getByRole('button', { name: 'YouTubeキーを保存', exact: true }).click();
+    await options.getByLabel('Jev APIキー').fill('synthetic-follow-jev');
+    await options.getByRole('button', { name: 'Jevキーを保存', exact: true }).click();
+    const youtube = await context.newPage(); await youtube.goto('https://www.youtube.com/watch?v=abcdefghijk'); await youtube.bringToFront();
+    const cdp = await context.browser()!.newBrowserCDPSession();
+    const { targetInfos } = await cdp.send('Target.getTargets', { filter: [{ type: 'tab', exclude: false }] });
+    const tab = targetInfos.find(target => target.type === 'tab' && target.url === youtube.url());
+    await cdp.send('Extensions.triggerAction', { id, targetId: tab!.targetId });
+    const popupPromise = context.waitForEvent('page');
+    await worker.evaluate(extensionId => chrome.tabs.create({ url: `chrome-extension://${extensionId}/popup.html`, active: false }), id);
+    const popup = await popupPromise;
+    await expect(popup.getByRole('button', { name: 'この動画のチャットを取得' })).toBeEnabled();
+    const monitorPromise = context.waitForEvent('page'); await popup.getByRole('button', { name: 'この動画のチャットを取得' }).click();
+    const monitor = await monitorPromise;
+    await monitor.getByRole('button', { name: '取得を開始', exact: true }).click();
+    await expect(monitor.locator('#messages')).toContainText('chat-abcdefghijk', { timeout: 15000 });
+    await monitor.getByRole('button', { name: 'Jev判定を有効化・再開' }).click();
+    await expect(monitor.getByTestId('jev-status')).toContainText('有効');
+    const other = await context.newPage(); await other.goto('https://www.youtube.com/watch?v=otherlive01');
+    const otherWindow = await worker.evaluate(async () => {
+      const created = await (chrome.windows as unknown as { create(options: { url: string; type: string }): Promise<ChromeWindow> })
+        .create({ url: 'https://www.youtube.com/watch?v=otherlive02', type: 'normal' });
+      return created.id;
+    });
+    expect(otherWindow).toBeDefined();
+    await expect(monitor.locator('.viewer-header')).toContainText('abcdefghijk');
+    await expect.poll(() => typeof releaseOld, { timeout: 12000 }).toBe('function');
+    await youtube.goto('https://www.youtube.com/watch?v=zyxwvutsrqp');
+    releaseOld!();
+    await expect(monitor.locator('.viewer-header')).toContainText('zyxwvutsrqp');
+    await expect(monitor.getByRole('button', { name: '取得を停止', exact: true })).toBeEnabled();
+    await expect(monitor.getByTestId('jev-status')).toContainText('有効', { timeout: 35000 });
+    await expect(monitor.locator('#messages')).toContainText('chat-zyxwvutsrqp', { timeout: 35000 });
+    await expect(monitor.getByTestId('jev-status')).toContainText('認証に失敗');
+    expect(jevCalls).toBe(1);
+    await expect(monitor.locator('#messages')).not.toContainText('chat-abcdefghijk');
+    expect(resolved).toEqual(['abcdefghijk', 'zyxwvutsrqp']);
+    expect(pages.find(page => page.chat === 'chat-zyxwvutsrqp')!.token).toBeNull();
+    for (let index = 1; index < pages.length; index++) expect(pages[index].time - pages[index - 1].time).toBeGreaterThanOrEqual(4900);
+    // Same-video query/hash and a full reload keep the selection, not a new resolve.
+    await youtube.evaluate(() => history.pushState(null, '', '/watch?v=zyxwvutsrqp&t=10#chat'));
+    await youtube.reload();
+    await expect(monitor.getByRole('button', { name: '取得を停止', exact: true })).toBeEnabled();
+    expect(resolved).toEqual(['abcdefghijk', 'zyxwvutsrqp']);
+    await monitor.getByRole('button', { name: '取得を停止', exact: true }).click();
+    await youtube.evaluate(() => history.pushState(null, '', '/live/finalvideo1'));
+    await expect(monitor.locator('.viewer-header')).toContainText('finalvideo1');
+    await expect(monitor.getByRole('button', { name: '取得を開始', exact: true })).toBeEnabled();
+    await monitor.waitForTimeout(5500); expect(resolved).toEqual(['abcdefghijk', 'zyxwvutsrqp']);
+    await monitor.getByRole('button', { name: '取得を開始', exact: true }).click();
+    await expect(monitor.locator('#messages')).toContainText('chat-finalvideo1', { timeout: 15000 });
+    await youtube.goto('https://example.com/outside');
+    await expect(monitor.getByRole('button', { name: '取得を停止', exact: true })).toBeDisabled();
+    await expect(monitor.getByText(/視聴タブが変更または閉じられました/)).toBeVisible();
+    const count = pages.length;
+    await youtube.goto('https://www.youtube.com/watch?v=abcdefghijk');
+    await monitor.waitForTimeout(5500); expect(pages).toHaveLength(count);
+    await expect(monitor.getByRole('button', { name: '取得を開始', exact: true })).toBeDisabled();
+  } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
+});
 
 test('production MV3: activeTabから選択しYouTubeタブ前面でもfixture取得を継続、停止/キー削除', async () => {
   test.setTimeout(90000);
@@ -132,8 +232,8 @@ test('production MV3: activeTabから選択しYouTubeタブ前面でもfixture�
     await youtube.waitForTimeout(5500);
     expect(tokens).toHaveLength(invalidCount);
     await youtube.goto('https://www.youtube.com/watch?v=zyxwvutsrqp');
-    await expect(monitor.getByRole('button', { name: '取得を開始' })).toBeDisabled();
-    await expect(monitor.getByText(/視聴タブが変更または閉じられました/)).toBeVisible();
+    await expect(monitor.getByRole('button', { name: '取得を開始' })).toBeEnabled();
+    await expect(monitor.locator('.viewer-header')).toContainText('zyxwvutsrqp');
     expect(pageErrors).toEqual([]);
   } finally {
     await context.close();

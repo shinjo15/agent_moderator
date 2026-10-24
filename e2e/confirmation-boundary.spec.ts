@@ -89,6 +89,8 @@ test('MV3 background: 旧runtime/旧版/読取・保存失敗は通信0、Jev有
         await worker.evaluate(value => chrome.storage.local.set({ 'usage.confirmation': value }), value);
         await monitor.evaluate(() => (globalThis as unknown as { confirmationStopped: Promise<void> }).confirmationStopped);
       }
+      expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'youtube.start', videoId: 'abcdefghijk', explicit: true })))
+        .toEqual({ ok: true });
       expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'youtube.resolve', requestId: 'legacy', videoId: 'abcdefghijk' })))
         .toMatchObject({ ok: false, error: { code: 'confirmationRequired' } });
       expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'jev.enable' })))
@@ -103,6 +105,7 @@ test('MV3 background: 旧runtime/旧版/読取・保存失敗は通信0、Jev有
     await options.getByLabel('利用規約（案）とプライバシーポリシー（案）に同意し、データ送信・費用の説明を確認しました', { exact: true }).check();
     await options.getByRole('button', { name: '同意を保存', exact: true }).click();
     await expect(options.getByTestId('confirmation-status')).toContainText('保存・取得できませんでした');
+    expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'youtube.start', videoId: 'abcdefghijk', explicit: true }))).toEqual({ ok: true });
     expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'youtube.resolve', requestId: 'failed-save', videoId: 'abcdefghijk' })))
       .toMatchObject({ ok: false });
     expect(youtubeCalls).toBe(0); expect(jevCalls).toBe(0);
@@ -110,6 +113,7 @@ test('MV3 background: 旧runtime/旧版/読取・保存失敗は通信0、Jev有
     await confirmUsage(options);
     expect(youtubeCalls).toBe(0); expect(jevCalls).toBe(0);
     expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'jev.enable' }))).toEqual({ ok: true });
+    expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'youtube.start', videoId: 'abcdefghijk', explicit: true }))).toEqual({ ok: true });
     expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'youtube.resolve', requestId: 'confirmed', videoId: 'abcdefghijk' }))).toMatchObject({ ok: true });
     // Test-only cooldown reset avoids a real-time sleep; production cooldown regressions are separate.
     await worker.evaluate(() => chrome.storage.session.set({ 'youtube.cooldown': { interval: 5000, notBefore: 0 } }));

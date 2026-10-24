@@ -147,5 +147,5 @@ export function createModeration({ client, readKey, session, now = Date.now, rea
     void result.finally(() => pending.delete(id));
     return result;
   }
-  return { observe, enable, evaluate, stop, stopCollection, reset };
+  return { observe, enable, evaluate, stop, stopCollection, reset, isEnabled: () => enabled };
 }

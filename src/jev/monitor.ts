@@ -139,5 +139,11 @@ export function createJevPanel(main: HTMLElement, transport: ReturnType<typeof c
     // A single in-flight evaluation may still reference this row, but not its old body.
     item.replaceChildren(); item.remove();
   }
-  return { add, remove, stop, setTarget(available: boolean) { valid = available; buttons(); } };
+  return { add, remove, stop,
+    resetTarget() {
+      generation++; enabled = false; enabling = false; valid = false;
+      pending.clear(); waiting.clear(); status.textContent = t('jevNotEnabled'); buttons();
+    },
+    resolved(active: boolean) { enabled = active; enabling = false; status.textContent = t(active ? 'jevEnabled' : 'jevNotEnabled'); buttons(); },
+    setTarget(available: boolean) { valid = available; buttons(); } };
 }

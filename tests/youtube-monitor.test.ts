@@ -28,6 +28,52 @@ it('受信IDは停止中idleでも60秒後に解放し再開後の同IDを通知
   expect(onMessages).toHaveBeenCalledTimes(2);
   monitor.stop();
 });
+it('手動開始と自動追従の開始認可を区別し、Stop後の手動再開でも認可を取り直す', async () => {
+  const { monitor, transport } = setup();
+  const startCollection = vi.fn().mockResolvedValue({ ok: true }); Object.assign(transport, { startCollection });
+  monitor.start(false); await vi.advanceTimersByTimeAsync(0);
+  expect(startCollection).toHaveBeenLastCalledWith('abcdefghijk', false, expect.any(AbortSignal));
+  monitor.stop(); monitor.start(); await vi.advanceTimersByTimeAsync(5000);
+  expect(startCollection).toHaveBeenLastCalledWith('abcdefghijk', true, expect.any(AbortSignal));
+  expect(startCollection).toHaveBeenCalledTimes(2); monitor.stop();
+});
+
+it('送信queue待ちで延びた内部leaseだけは指定時間まで待ち、provider失敗として止めない', async () => {
+  const { monitor, transport, onState } = setup();
+  transport.resolveVideo.mockResolvedValueOnce({ ok: false, error: { ...failure('rateLimited', 25000).error, waitRequired: true } });
+  monitor.start(); await vi.advanceTimersByTimeAsync(0);
+  expect(monitor.isRunning()).toBe(true); expect(onState).toHaveBeenLastCalledWith({ status: 'running' });
+  await vi.advanceTimersByTimeAsync(24999); expect(transport.resolveVideo).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1); expect(transport.resolveVideo).toHaveBeenCalledTimes(2); monitor.stop();
+});
+
+it('readiness中のnavigation失効もprovider失敗と区別して次の対象通知まで待つ', async () => {
+  const { monitor, transport, onState } = setup();
+  const readiness = vi.fn().mockResolvedValue({ ok: false, error: { ...failure('aborted').error, targetChanged: true } });
+  Object.assign(transport, { readiness }); monitor.start();
+  await vi.advanceTimersByTimeAsync(60000);
+  expect(monitor.isRunning()).toBe(true); expect(readiness).toHaveBeenCalledTimes(1);
+  expect(onState).toHaveBeenLastCalledWith({ status: 'running' }); monitor.stop();
+});
+
+it('親動画追従はrunningだけを引継ぎ、session leaseを待って新videoを解決する', async () => {
+  const { monitor, transport, onState } = setup();
+  const readiness = vi.fn().mockResolvedValue({ ok: true, value: { waitMillis: 25000 } });
+  Object.assign(transport, { readiness });
+  monitor.start(); await vi.advanceTimersByTimeAsync(0);
+  expect(transport.resolveVideo).not.toHaveBeenCalled();
+  monitor.followVideo('zyxwvutsrqp');
+  expect(onState).toHaveBeenLastCalledWith({ status: 'running' });
+  await vi.advanceTimersByTimeAsync(24999);
+  expect(transport.resolveVideo).not.toHaveBeenCalled();
+  readiness.mockResolvedValue({ ok: true, value: { waitMillis: 0 } });
+  await vi.advanceTimersByTimeAsync(1);
+  expect(transport.resolveVideo).toHaveBeenLastCalledWith('zyxwvutsrqp', expect.any(AbortSignal));
+  monitor.stop(); monitor.followVideo('abcdefghijk');
+  await vi.advanceTimersByTimeAsync(60000);
+  expect(transport.resolveVideo).toHaveBeenCalledTimes(1);
+});
+
 it('大量inputで一時ID上限を超えると取得を止め明示的な容量エラーを表示する', async () => {
   const { monitor, transport, onState, onMessages } = setup();
   transport.listMessages.mockResolvedValue(page(Array.from({ length: 10001 }, (_, i) => `many-${i}`)));

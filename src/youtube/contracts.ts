@@ -17,7 +17,7 @@ export const errorMessages = {
 } as const;
 
 export type ErrorCode = keyof typeof errorMessages;
-export type ChatError = { code: ErrorCode; message: string; retryAfterMillis?: number };
+export type ChatError = { code: ErrorCode; message: string; retryAfterMillis?: number; targetChanged?: true; waitRequired?: true };
 export type Result<T> = { ok: true; value: T } | { ok: false; error: ChatError };
 export const validDisplayName = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 export const validChannelId = (value: unknown): value is string => typeof value === 'string' && /^UC[A-Za-z0-9_-]{22}$/.test(value);

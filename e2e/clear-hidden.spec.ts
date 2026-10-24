@@ -126,13 +126,15 @@ test('MV3 統合: 未確認でも全削除可能、削除後の未確認明示�
     })).toEqual({ hidden: [], confirmation: undefined, youtube: true, jev: true });
     expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'youtube.list', requestId: 'stale-list', liveChatId: 'old-chat' })))
       .toMatchObject({ ok: false, error: { code: 'aborted' } });
-    expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'youtube.resolve', requestId: 'explicit-unconfirmed', videoId: 'abcdefghijk' })))
-      .toMatchObject({ ok: false, error: { code: 'confirmationRequired' } });
+    expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'youtube.resolve', requestId: 'stale-resolve', videoId: 'abcdefghijk' })))
+      .toMatchObject({ ok: false, error: { code: 'aborted' } });
+    await monitor.getByRole('button', { name: '取得を開始', exact: true }).click();
+    await expect(monitor.getByRole('status')).toContainText('設定で利用規約案');
     expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'jev.enable' })))
       .toMatchObject({ ok: false, error: { code: 'confirmationRequired' } });
     expect(youtubeCalls).toBe(0); expect(jevCalls).toBe(0);
     expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.get' })))
       .toEqual({ ok: true, value: { confirmed: false, version: 3 } });
-    expect((await worker.evaluate(() => chrome.storage.session.get(null)))['hidden.collectionPaused']).toBe(true);
+    await expect.poll(async () => (await worker.evaluate(() => chrome.storage.session.get(null)))['hidden.collectionPaused']).toBe(true);
   } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
 });

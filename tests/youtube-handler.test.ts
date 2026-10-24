@@ -1,10 +1,12 @@
 import { expect, it, vi } from 'vitest';
 import { createYouTubeHandler } from '../src/youtube/background-handler';
 import { failure } from '../src/youtube/contracts';
+import { createChatMonitor } from '../src/youtube/monitor';
 import { createModeration as createUnconfirmedModeration } from '../src/jev/moderation';
 import { createJevClient } from './fixtures/jev-client';
 import { apiResponse, chatPost } from './fixtures/jev';
 import { createHiddenAuthors } from '../src/hidden-authors/store';
+import { createHiddenAuthorHandler } from '../src/hidden-authors/handler';
 import { createYouTubeClient } from '../src/youtube/client';
 import { createConfirmation, CONFIRMATION_KEY, CONFIRMATION_VERSION } from '../src/confirmation';
 const createModeration = (deps: Parameters<typeof createUnconfirmedModeration>[0]) =>
@@ -30,12 +32,306 @@ function setup() {
   const readApiKey = vi.fn(async () => 'fixture-key' as string | undefined);
   let now = 0;
   const deps = { session, tabs, windows, client, readApiKey, readConfirmation: vi.fn(async () => true), initialize: vi.fn(async () => {}),
-    runtime: { id: 'test', getURL: (path: string) => `chrome-extension://test/${path}`, sendMessage: vi.fn(async () => {}) }, now: () => now };
+    runtime: { id: 'test', getURL: (path: string) => `chrome-extension://test/${path}`, sendMessage: vi.fn(async (_message: unknown) => {}) }, now: () => now };
   return { handler: createYouTubeHandler(deps), deps, values, advance: (n: number) => { now += n; } };
 }
 const popup = { id: 'test', url: 'chrome-extension://test/popup.html' };
 const monitor = { id: 'test', url: 'chrome-extension://test/monitor.html', tab: { id: 10 } };
 const open = { type: 'youtube.openMonitor', tabId: 9, videoId: 'abcdefghijk' };
+
+it('自動Start成功後の全削除は通知未配送でも旧UIのresolve/listを拒否し、明示Startだけ再開する', async () => {
+  const { deps, values, advance } = setup();
+  const storage = { ...deps.session, get: async (keys: string[] | null) => keys === null ? structuredClone(values)
+    : Object.fromEntries(keys.map(key => [key, structuredClone(values[key])])) };
+  const hiddenAuthors = createHiddenAuthors({ storage, initialize: deps.initialize });
+  const handler = createYouTubeHandler({ ...deps, hiddenAuthors });
+  await handler.handle(open, popup);
+  await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'initial' }, monitor);
+  expect(await handler.handle({ type: 'youtube.start', videoId: open.videoId, explicit: false }, monitor)).toEqual({ ok: true });
+  const delivery = deferred(); const notified = deferred();
+  deps.runtime.sendMessage.mockImplementation(async message => {
+    if ((message as { type: string }).type === 'hidden.refresh') { notified.resolve(); await delivery.promise; }
+  });
+  const clearing = handler.clearHiddenData(); await notified.promise; advance(5000);
+  const lateResolve = await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'late' }, monitor);
+  const lateList = await handler.handle({ type: 'youtube.list', liveChatId: 'chat-1', requestId: 'late-list' }, monitor);
+  delivery.resolve(); await clearing;
+  expect(lateResolve).toEqual(failure('aborted')); expect(lateList).toEqual(failure('aborted'));
+  expect(deps.client.resolveVideo).toHaveBeenCalledTimes(1); expect(deps.client.listMessages).not.toHaveBeenCalled();
+  expect(values['hidden.collectionPaused']).toBe(true); expect(await hiddenAuthors.channelForVideo(open.videoId)).toBeUndefined();
+  expect(await handler.handle({ type: 'youtube.start', videoId: open.videoId, explicit: false }, monitor)).toEqual(failure('aborted'));
+  expect(await handler.handle({ type: 'youtube.start', videoId: open.videoId, explicit: true }, monitor)).toEqual({ ok: true });
+  expect(await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'explicit' }, monitor)).toMatchObject({ ok: true });
+});
+
+it('同じ親の移動はbindingを維持し旧scopeを捨て、worker復帰後も最終videoだけを選ぶ', async () => {
+  const { deps, values } = setup();
+  const handler = createYouTubeHandler(deps);
+  await handler.handle(open, popup);
+  await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'initial' }, monitor);
+  deps.tabs.get.mockImplementation(async id => ({ id, url: id === 9 ? 'https://www.youtube.com/watch?v=zyxwvutsrqp' : monitor.url }));
+  await handler.targetChanged(9, 'https://www.youtube.com/watch?v=zyxwvutsrqp');
+  expect(values['youtube.monitorBinding']).toMatchObject({ monitorTabId: 10, targetTabId: 9, videoId: 'zyxwvutsrqp' });
+  expect(values['youtube.monitorBinding']).not.toHaveProperty('liveChatId');
+  expect(values['youtube.monitorBinding']).not.toHaveProperty('broadcasterChannelId');
+  expect(await createYouTubeHandler(deps).handle({ type: 'youtube.status' }, monitor)).toMatchObject({ ok: true, value: { videoId: 'zyxwvutsrqp' } });
+});
+
+it('nav同期abortがbinding書込より先に返ってもmonitorは実API失敗扱いせず追従意図を保つ', async () => {
+  vi.useFakeTimers();
+  try {
+    const { deps, values, advance } = setup(); const handler = createYouTubeHandler(deps);
+    await handler.handle(open, popup);
+    const onState = vi.fn();
+    const chat = createChatMonitor({ now: () => Date.now(), onState, onMessages: vi.fn(), transport: {
+      resolveVideo: async videoId => handler.handle({ type: 'youtube.resolve', videoId, requestId: 'resolve' }, monitor) as never,
+      listMessages: async liveChatId => handler.handle({ type: 'youtube.list', liveChatId, requestId: 'list' }, monitor) as never,
+    } });
+    chat.credentialsChanged(true); chat.setVideo(open.videoId); chat.start();
+    await vi.advanceTimersByTimeAsync(0); advance(5000);
+    deps.client.listMessages.mockImplementationOnce((_chat, _token, _key, signal: AbortSignal) => new Promise(resolve => {
+      signal.addEventListener('abort', () => resolve(failure('aborted')), { once: true });
+    }));
+    await vi.advanceTimersByTimeAsync(5000);
+    const entered = deferred(); const commit = deferred();
+    deps.session.set.mockImplementation(async data => {
+      if ('youtube.monitorBinding' in data) { entered.resolve(); await commit.promise; }
+      Object.assign(values, data);
+    });
+    deps.tabs.get.mockImplementation(async id => ({ id, url: id === 9 ? 'https://www.youtube.com/watch?v=zyxwvutsrqp' : monitor.url }));
+    const navigation = handler.targetChanged(9, 'https://www.youtube.com/watch?v=zyxwvutsrqp');
+    await entered.promise; await vi.advanceTimersByTimeAsync(0);
+    expect(chat.isRunning()).toBe(true);
+    expect(onState).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }));
+    commit.resolve(); await navigation; chat.followVideo('zyxwvutsrqp'); chat.stop();
+  } finally { vi.useRealTimers(); }
+});
+
+it('navigation開始後に旧UIの新規readinessが届いても切替保留としてrunningを保つ', async () => {
+  vi.useFakeTimers();
+  try {
+    const { deps, values, advance } = setup(); const handler = createYouTubeHandler(deps);
+    await handler.handle(open, popup);
+    const onState = vi.fn();
+    const chat = createChatMonitor({ now: () => Date.now(), onState, onMessages: vi.fn(), transport: {
+      readiness: async () => handler.handle({ type: 'youtube.status' }, monitor) as never,
+      resolveVideo: async videoId => handler.handle({ type: 'youtube.resolve', videoId, requestId: 'resolve' }, monitor) as never,
+      listMessages: async liveChatId => handler.handle({ type: 'youtube.list', liveChatId, requestId: 'list' }, monitor) as never,
+    } });
+    chat.credentialsChanged(true); chat.setVideo(open.videoId); chat.start(); await vi.advanceTimersByTimeAsync(0);
+    const entered = deferred(); const commit = deferred();
+    deps.session.set.mockImplementationOnce(async data => { entered.resolve(); await commit.promise; Object.assign(values, data); });
+    deps.tabs.get.mockImplementation(async id => ({ id, url: id === 9 ? 'https://www.youtube.com/watch?v=zyxwvutsrqp' : monitor.url }));
+    const navigation = handler.targetChanged(9, 'https://www.youtube.com/watch?v=zyxwvutsrqp'); await entered.promise;
+    advance(5000); await vi.advanceTimersByTimeAsync(5000);
+    expect(chat.isRunning()).toBe(true); expect(onState).toHaveBeenLastCalledWith({ status: 'running' });
+    commit.resolve(); await navigation; chat.followVideo('zyxwvutsrqp'); chat.stop();
+  } finally { vi.useRealTimers(); }
+});
+
+it.each([true, false])('正常切替はbackgroundで有効だったJevだけをresolve成功後に引継ぐ: %s', async enabled => {
+  const { deps, advance } = setup();
+  const moderation = createModeration({ client: createJevClient(vi.fn()), readKey: async () => 'synthetic' });
+  const handler = createYouTubeHandler({ ...deps, moderation });
+  await handler.handle(open, popup);
+  await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'initial' }, monitor);
+  if (enabled) expect(await handler.handle({ type: 'jev.enable' }, monitor)).toEqual({ ok: true });
+  deps.tabs.get.mockImplementation(async id => ({ id, url: id === 9 ? 'https://www.youtube.com/watch?v=zyxwvutsrqp' : monitor.url }));
+  await handler.targetChanged(9, 'https://www.youtube.com/watch?v=zyxwvutsrqp'); advance(5000);
+  expect(await handler.handle({ type: 'youtube.resolve', videoId: 'zyxwvutsrqp', requestId: 'next' }, monitor))
+    .toMatchObject({ ok: true, value: { jevEnabled: enabled } });
+});
+
+it('binding切替書込中のJev無効化は旧URL不一致でも受理し退避した再開を取り消す', async () => {
+  const { deps, values, advance } = setup();
+  const moderation = createModeration({ client: createJevClient(vi.fn()), readKey: async () => 'synthetic' });
+  const handler = createYouTubeHandler({ ...deps, moderation });
+  await handler.handle(open, popup);
+  await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'initial' }, monitor);
+  await handler.handle({ type: 'jev.enable' }, monitor);
+  const entered = deferred(); const commit = deferred();
+  deps.session.set.mockImplementationOnce(async data => { entered.resolve(); await commit.promise; Object.assign(values, data); });
+  deps.tabs.get.mockImplementation(async id => ({ id, url: id === 9 ? 'https://www.youtube.com/watch?v=zyxwvutsrqp' : monitor.url }));
+  const navigation = handler.targetChanged(9, 'https://www.youtube.com/watch?v=zyxwvutsrqp');
+  await entered.promise;
+  const disabled = await handler.handle({ type: 'jev.disable' }, monitor);
+  commit.resolve(); await navigation;
+  expect(disabled).toEqual({ ok: true }); advance(5000);
+  expect(await handler.handle({ type: 'youtube.resolve', videoId: 'zyxwvutsrqp', requestId: 'next' }, monitor))
+    .toMatchObject({ ok: true, value: { jevEnabled: false } });
+});
+
+it.each([0, 60000])('旧nav応答は25秒leaseを短縮せずRetryAfterは延長する: %i', async retryAfter => {
+  const { deps, values, advance } = setup(); const handler = createYouTubeHandler(deps);
+  await handler.handle(open, popup);
+  await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'resolve' }, monitor); advance(5000);
+  const entered = deferred(); const response = deferred<unknown>();
+  deps.client.listMessages.mockImplementationOnce(() => { entered.resolve(); return response.promise; });
+  const old = handler.handle({ type: 'youtube.list', liveChatId: 'chat-1', requestId: 'old' }, monitor);
+  await entered.promise;
+  expect(values['youtube.cooldown']).toMatchObject({ notBefore: 30000 });
+  deps.tabs.get.mockImplementation(async id => ({ id, url: id === 9 ? 'https://www.youtube.com/watch?v=zyxwvutsrqp' : monitor.url }));
+  await handler.targetChanged(9, 'https://www.youtube.com/watch?v=zyxwvutsrqp');
+  response.resolve(retryAfter ? failure('rateLimited', retryAfter) : failure('aborted')); await old;
+  expect((values['youtube.cooldown'] as { notBefore: number }).notBefore).toBe(Math.max(30000, 5000 + retryAfter));
+});
+
+it.each(['finalvideo1', 'abcdefghijk'])('Bのbinding書込待ちに親が%sへ移動したら最終対象だけ通知する', async finalVideo => {
+  const { deps, values } = setup(); const handler = createYouTubeHandler(deps);
+  await handler.handle(open, popup); deps.runtime.sendMessage.mockClear();
+  let url = 'https://www.youtube.com/watch?v=zyxwvutsrqp';
+  deps.tabs.get.mockImplementation(async id => ({ id, url: id === 9 ? url : monitor.url }));
+  const entered = deferred(); const commit = deferred();
+  deps.session.set.mockImplementationOnce(async data => { entered.resolve(); await commit.promise; Object.assign(values, data); });
+  const b = handler.targetChanged(9, url); await entered.promise;
+  url = `https://www.youtube.com/watch?v=${finalVideo}`;
+  const final = handler.targetChanged(9, url); commit.resolve(); await Promise.all([b, final]);
+  expect(values['youtube.monitorBinding']).toMatchObject({ videoId: finalVideo });
+  expect(deps.runtime.sendMessage.mock.calls.filter(([message]) => (message as { type?: string }).type === 'youtube.targetChanged')).toHaveLength(1);
+});
+
+it('worker再生成後のinactive親タブ移動を保存bindingから追い、Jevは復活させない', async () => {
+  const { deps, advance } = setup();
+  const oldModeration = createModeration({ client: createJevClient(vi.fn()), readKey: async () => 'synthetic' });
+  const original = createYouTubeHandler({ ...deps, moderation: oldModeration });
+  await original.handle(open, popup);
+  await original.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'initial' }, monitor);
+  await original.handle({ type: 'jev.enable' }, monitor);
+  const restarted = createYouTubeHandler({ ...deps, moderation: createModeration({ client: createJevClient(vi.fn()), readKey: async () => 'synthetic' }) });
+  deps.tabs.get.mockImplementation(async id => ({ id, url: id === 9 ? 'https://www.youtube.com/watch?v=zyxwvutsrqp' : monitor.url }));
+  await restarted.targetUpdated(9); advance(5000);
+  expect(await restarted.handle({ type: 'youtube.resolve', videoId: 'zyxwvutsrqp', requestId: 'next' }, monitor))
+    .toMatchObject({ ok: true, value: { jevEnabled: false } });
+});
+
+it.each(['key', 'confirmation'] as const)('切替待ちの%s変更はworker再生成後にも停止意図を保持する', async kind => {
+  const { deps, values } = setup(); const handler = createYouTubeHandler(deps);
+  await handler.handle(open, popup);
+  await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'initial' }, monitor);
+  if (kind === 'key') await handler.credentialsChanged(); else await handler.confirmationChanged();
+  expect(values['hidden.collectionPaused']).toBe(true);
+  expect(await createYouTubeHandler(deps).handle({ type: 'youtube.status' }, monitor)).toMatchObject({ ok: true, value: { paused: true } });
+});
+
+it('停止中の追従先が既知videoなら追加APIなしで保存済みchannelリストを確認できる', async () => {
+  const { deps, values } = setup(); const channel = 'UC1111111111111111111111';
+  const hiddenAuthors = createHiddenAuthors({ storage: deps.session, initialize: deps.initialize });
+  await hiddenAuthors.rememberVideo('zyxwvutsrqp', channel);
+  const handler = createYouTubeHandler({ ...deps, hiddenAuthors }); await handler.handle(open, popup);
+  await handler.handle({ type: 'jev.stopCollection' }, monitor);
+  deps.tabs.get.mockImplementation(async id => ({ id, url: id === 9 ? 'https://www.youtube.com/watch?v=zyxwvutsrqp' : monitor.url }));
+  await handler.targetChanged(9, 'https://www.youtube.com/watch?v=zyxwvutsrqp');
+  expect(values['youtube.monitorBinding']).toMatchObject({ videoId: 'zyxwvutsrqp', broadcasterChannelId: channel });
+  expect(deps.client.resolveVideo).not.toHaveBeenCalled();
+});
+
+it('Bの既知scope読取中にAへ戻っても世代を更新しAの追従通知を失わない', async () => {
+  const { deps, values } = setup(); const store = createHiddenAuthors({ storage: deps.session, initialize: deps.initialize });
+  const handler = createYouTubeHandler({ ...deps, hiddenAuthors: store }); await handler.handle(open, popup);
+  deps.runtime.sendMessage.mockClear();
+  const entered = deferred(); const release = deferred();
+  vi.spyOn(store, 'channelForVideo').mockImplementationOnce(async () => { entered.resolve(); await release.promise; return undefined; });
+  let url = 'https://www.youtube.com/watch?v=zyxwvutsrqp';
+  deps.tabs.get.mockImplementation(async id => ({ id, url: id === 9 ? url : monitor.url }));
+  const b = handler.targetChanged(9, url); await entered.promise;
+  url = 'https://www.youtube.com/watch?v=abcdefghijk';
+  const a = handler.targetChanged(9, url); release.resolve(); await Promise.all([b, a]);
+  expect(values['youtube.monitorBinding']).toMatchObject({ videoId: open.videoId, revision: expect.any(String) });
+  expect(deps.runtime.sendMessage).toHaveBeenCalledWith({ type: 'youtube.targetChanged' });
+});
+
+it('旧解除のstore current待ちがscope読取queueを塞いでもnav検知直後から解除を失効する', async () => {
+  const { deps, values } = setup(); const channel = 'UC0000000000000000000000'; const author = 'UCabcdefghijklmnopqrstuv';
+  const store = createHiddenAuthors({ storage: deps.session, initialize: deps.initialize });
+  const handler = createYouTubeHandler({ ...deps, hiddenAuthors: store });
+  await handler.handle(open, popup);
+  await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'initial' }, monitor);
+  await store.add(channel, author, 0);
+  const hidden = createHiddenAuthorHandler({ store, ...deps, currentTargetEpoch: handler.targetEpoch });
+  let url = 'https://www.youtube.com/watch?v=abcdefghijk';
+  const entered = deferred(); const release = deferred(); let reads = 0;
+  deps.tabs.get.mockImplementation(async id => {
+    if (++reads === 2) { entered.resolve(); await release.promise; }
+    return { id, url: id === 9 ? url : monitor.url };
+  });
+  const removing = hidden.handle({ type: 'hidden.remove', videoId: open.videoId, authorChannelId: author }, monitor);
+  await entered.promise;
+  const scopeWaiting = deferred(); const channelForVideo = store.channelForVideo;
+  vi.spyOn(store, 'channelForVideo').mockImplementation(video => { scopeWaiting.resolve(); return channelForVideo(video); });
+  url = 'https://www.youtube.com/watch?v=zyxwvutsrqp'; const b = handler.targetChanged(9, url); await scopeWaiting.promise;
+  expect(values['youtube.monitorBinding']).toMatchObject({ videoId: open.videoId });
+  url = 'https://www.youtube.com/watch?v=abcdefghijk'; const a = handler.targetChanged(9, url);
+  release.resolve(); const result = await removing; await Promise.all([b, a]);
+  expect(result).toEqual({ ok: false }); expect(await store.list(channel)).toEqual([author]); expect(await store.revision(channel, author)).toBe(0);
+});
+
+it('freshと判定したCOOLDOWN書込のcommit待ち中にnavしても25秒leaseを復元する', async () => {
+  const { deps, values, advance } = setup(); const handler = createYouTubeHandler(deps);
+  await handler.handle(open, popup);
+  await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'resolve' }, monitor); advance(5000);
+  const entered = deferred(); const commit = deferred();
+  deps.session.set.mockImplementation(async data => {
+    const cooldown = data['youtube.cooldown'] as { notBefore?: number } | undefined;
+    if (cooldown?.notBefore === 13000) { entered.resolve(); await commit.promise; }
+    Object.assign(values, data);
+  });
+  const old = handler.handle({ type: 'youtube.list', liveChatId: 'chat-1', requestId: 'old' }, monitor); await entered.promise;
+  expect(values['youtube.cooldown']).toMatchObject({ notBefore: 30000 });
+  deps.tabs.get.mockImplementation(async id => ({ id, url: id === 9 ? 'https://www.youtube.com/watch?v=zyxwvutsrqp' : monitor.url }));
+  await handler.targetChanged(9, 'https://www.youtube.com/watch?v=zyxwvutsrqp'); commit.resolve(); await old;
+  expect(values['youtube.cooldown']).toMatchObject({ notBefore: 30000 });
+});
+
+it('provider失敗直後にUI受信より先にnavしてもbackgroundの停止状態を引継ぐ', async () => {
+  const { deps, advance } = setup();
+  const moderation = createModeration({ client: createJevClient(vi.fn()), readKey: async () => 'synthetic' });
+  const handler = createYouTubeHandler({ ...deps, moderation }); await handler.handle(open, popup);
+  await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'initial' }, monitor);
+  await handler.handle({ type: 'jev.enable' }, monitor); advance(5000);
+  deps.client.listMessages.mockResolvedValueOnce(failure('rateLimited', 30000));
+  expect(await handler.handle({ type: 'youtube.list', liveChatId: 'chat-1', requestId: 'failed' }, monitor)).toEqual(failure('rateLimited', 30000));
+  deps.tabs.get.mockImplementation(async id => ({ id, url: id === 9 ? 'https://www.youtube.com/watch?v=zyxwvutsrqp' : monitor.url }));
+  await handler.targetChanged(9, 'https://www.youtube.com/watch?v=zyxwvutsrqp');
+  expect(await handler.handle({ type: 'youtube.status' }, monitor)).toMatchObject({ ok: true, value: { paused: true } });
+  expect(moderation.isEnabled()).toBe(false);
+});
+
+it('停止後は自動開始を拒否し、手動開始だけが同じchat/pageTokenの取得を再許可する', async () => {
+  const { deps, advance } = setup(); const handler = createYouTubeHandler(deps);
+  await handler.handle(open, popup);
+  await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'initial' }, monitor); advance(5000);
+  await handler.handle({ type: 'jev.stopCollection' }, monitor);
+  expect(await handler.handle({ type: 'youtube.start', explicit: false, videoId: open.videoId }, monitor)).toMatchObject({ ok: false });
+  expect(await handler.handle({ type: 'youtube.start', explicit: true, videoId: open.videoId }, monitor)).toEqual({ ok: true });
+  expect(await handler.handle({ type: 'youtube.list', liveChatId: 'chat-1', pageToken: 'resume-token', requestId: 'resume' }, monitor)).toMatchObject({ ok: true });
+  expect(deps.client.listMessages).toHaveBeenCalledWith('chat-1', 'resume-token', 'fixture-key', expect.any(AbortSignal));
+});
+
+it('statusの親URL読取await中にnavが始まってもinvalidInput停止に落とさない', async () => {
+  const { deps, values } = setup(); const handler = createYouTubeHandler(deps); await handler.handle(open, popup);
+  const reading = deferred(); const release = deferred();
+  deps.tabs.get.mockImplementationOnce(async id => { reading.resolve(); await release.promise; return { id, url: 'https://www.youtube.com/watch?v=zyxwvutsrqp' }; });
+  const status = handler.handle({ type: 'youtube.status' }, monitor); await reading.promise;
+  const writing = deferred(); const commit = deferred();
+  deps.session.set.mockImplementationOnce(async data => { writing.resolve(); await commit.promise; Object.assign(values, data); });
+  deps.tabs.get.mockImplementation(async id => ({ id, url: id === 9 ? 'https://www.youtube.com/watch?v=zyxwvutsrqp' : monitor.url }));
+  const navigation = handler.targetChanged(9, 'https://www.youtube.com/watch?v=zyxwvutsrqp'); await writing.promise;
+  release.resolve(); const result = await status; commit.resolve(); await navigation;
+  expect(result).toMatchObject({ ok: false, error: { code: 'aborted', targetChanged: true } });
+});
+
+it('移動途中のStopをURL不一致でも受理し、statusはsession leaseの残待機を返す', async () => {
+  const { deps, values } = setup();
+  const handler = createYouTubeHandler(deps);
+  await handler.handle(open, popup);
+  values['youtube.cooldown'] = { interval: 5000, notBefore: 25000 };
+  deps.tabs.get.mockImplementation(async id => ({ id, url: id === 9 ? 'https://www.youtube.com/watch?v=zyxwvutsrqp' : monitor.url }));
+  expect(await handler.handle({ type: 'jev.stopCollection' }, monitor)).toEqual({ ok: true });
+  await handler.targetChanged(9, 'https://www.youtube.com/watch?v=zyxwvutsrqp');
+  expect(values['hidden.collectionPaused']).toBe(true);
+  expect(await handler.handle({ type: 'youtube.status' }, monitor)).toMatchObject({ ok: true, value: { waitMillis: 25000, paused: true } });
+  expect(values['youtube.cooldown']).toEqual({ interval: 5000, notBefore: 25000 });
+});
 
 it('resolve前はscope未確定、成功時だけ旧保存を移行しworker再作成後も同scopeを復元する', async () => {
   const { deps, values, advance } = setup(); const channel = 'UC0000000000000000000000'; const author = 'UCabcdefghijklmnopqrstuv';
@@ -86,6 +382,7 @@ it('再resolve失敗では旧scopeを無効化し、別動画/配信者への切
   advance(5000); deps.tabs.get.mockImplementation(async id => ({ id, windowId: id === 9 ? 1 : 2,
     url: id === 9 ? 'https://www.youtube.com/watch?v=zyxwvutsrqp' : monitor.url }));
   await handler.handle({ ...open, videoId: 'zyxwvutsrqp' }, popup);
+  expect(await handler.handle({ type: 'youtube.start', videoId: 'zyxwvutsrqp', explicit: true }, monitor)).toEqual({ ok: true });
   deps.client.resolveVideo.mockResolvedValueOnce({ ok: true, value: { liveChatId: 'chat-2', broadcasterChannelId: other } });
   await handler.handle({ type: 'youtube.resolve', videoId: 'zyxwvutsrqp', requestId: 'other' }, monitor);
   expect(values['youtube.monitorBinding']).toMatchObject({ broadcasterChannelId: other });
@@ -224,7 +521,7 @@ it.each([
   expect(await moderation.evaluate('new-confirmed-post')).toMatchObject({ ok: true, value: { jev: 'evaluated' } });
   expect(fetcher).toHaveBeenCalledTimes(1); moderation.reset();
 });
-it('全削除で遅延list/queueとcached判定を失効、cooldown保持、明示resolve後の新規判定だけ再登録', async () => {
+it('全削除で遅延list/queueとcached判定を失効、cooldown保持、明示Start後の新規判定だけ再登録', async () => {
   const { deps, advance, values } = setup();
   // Test storage emulates Chrome get(null), without reading a real user profile.
   deps.session.get.mockImplementation(async keys => keys === null ? structuredClone(values) : Object.fromEntries(keys.map(key => [key, values[key]])));
@@ -251,6 +548,8 @@ it('全削除で遅延list/queueとcached判定を失効、cooldown保持、明�
   expect(await handler.handle({ type: 'jev.evaluate', id: 'cached' }, monitor)).toMatchObject({ ok: false });
   expect(await handler.handle({ type: 'youtube.list', requestId: 'old-page', liveChatId: 'chat-1' }, monitor)).toMatchObject({ ok: false });
   expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([]);
+  expect(await handler.handle({ type: 'youtube.resolve', requestId: 'stale-resolve', videoId: open.videoId }, monitor)).toEqual(failure('aborted'));
+  expect(await handler.handle({ type: 'youtube.start', videoId: open.videoId, explicit: true }, monitor)).toEqual({ ok: true });
   expect(await handler.handle({ type: 'youtube.resolve', requestId: 'too-soon', videoId: open.videoId }, monitor)).toMatchObject({ ok: false, error: { code: 'rateLimited' } });
   advance(30000);
   expect(await handler.handle({ type: 'jev.enable' }, monitor)).toEqual({ ok: true });
@@ -261,7 +560,7 @@ it('全削除で遅延list/queueとcached判定を失効、cooldown保持、明�
   expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([post.authorChannelId]);
   moderation.reset();
 });
-it('全削除後にworkerを再作成しても旧listは停止し、新明示resolveだけが再開できる', async () => {
+it('全削除後にworkerを再作成しても旧list/resolveは停止し、新明示Startだけが再開できる', async () => {
   const { deps, advance, values } = setup();
   deps.session.get.mockImplementation(async keys => keys === null ? structuredClone(values) : Object.fromEntries(keys.map(key => [key, values[key]])));
   const hiddenAuthors = createHiddenAuthors({ storage: deps.session, initialize: deps.initialize });
@@ -272,6 +571,8 @@ it('全削除後にworkerを再作成しても旧listは停止し、新明示res
   const restarted = createYouTubeHandler({ ...deps, hiddenAuthors: createHiddenAuthors({ storage: deps.session, initialize: deps.initialize }) });
   expect(await restarted.handle({ type: 'youtube.list', requestId: 'stale', liveChatId: 'chat-1' }, monitor)).toEqual(failure('aborted'));
   expect(deps.client.listMessages).not.toHaveBeenCalled();
+  expect(await restarted.handle({ type: 'youtube.resolve', requestId: 'stale-resolve', videoId: open.videoId }, monitor)).toEqual(failure('aborted'));
+  expect(await restarted.handle({ type: 'youtube.start', videoId: open.videoId, explicit: true }, monitor)).toEqual({ ok: true });
   expect(await restarted.handle({ type: 'youtube.resolve', requestId: 'explicit', videoId: open.videoId }, monitor)).toMatchObject({ ok: true });
   advance(5000);
   expect(await restarted.handle({ type: 'youtube.list', requestId: 'fresh', liveChatId: 'chat-1' }, monitor)).toMatchObject({ ok: true });
@@ -378,6 +679,7 @@ it.each([
     expect(await pending).toEqual(failure('aborted'));
     moderation.observe([chatPost('stale-enable')]); await moderation.evaluate('stale-enable');
     expect(youtubeFetch).not.toHaveBeenCalled(); expect(jevFetch).not.toHaveBeenCalled();
+    if (type === 'youtube.resolve') expect(await handler.handle({ type: 'youtube.start', videoId: open.videoId, explicit: true }, monitor)).toEqual({ ok: true });
     expect(await handler.handle(type === 'jev.enable' ? { type } : { ...request, requestId: 'new' }, monitor)).toMatchObject({ ok: true });
     if (type === 'jev.enable') { moderation.observe([chatPost('explicit-resume', 1)]); await moderation.evaluate('explicit-resume'); expect(jevFetch).toHaveBeenCalledTimes(1); }
     else expect(youtubeFetch).toHaveBeenCalledTimes(1);
@@ -706,7 +1008,7 @@ it('stopCollection成功後はcancel未配送でも停止前の遅延listを観�
   await waiting.promise;
   expect(await handler.handle({ type: 'jev.stopCollection' }, monitor)).toEqual({ ok: true });
   // Deliberately deliver no youtube.cancel: stop itself must invalidate this response.
-  expect((deps.client.listMessages.mock.calls[0][3] as AbortSignal).aborted).toBe(false);
+  expect((deps.client.listMessages.mock.calls[0][3] as AbortSignal).aborted).toBe(true);
   response.resolve({ ok: true, value: {
     messages: [{ ...chatPost('late-rename'), authorChannelId: existingAuthor, authorDisplayName: '停止後の古い処理の名前' },
       ...Array.from({ length: 10 }, (_, n) => ({ ...chatPost(`late-burst-${n}`, n * 1000), authorChannelId: lateAuthor, authorDisplayName: 'さくら' }))],
@@ -872,7 +1174,7 @@ it('resolveの遅延binding書込を対象削除と交差させても旧binding�
   commit.resolve();
   await changed;
   expect(values['youtube.monitorBinding']).toBeUndefined();
-  expect(await request).toEqual(failure('aborted'));
+  expect(await request).toEqual({ ...failure('aborted'), error: { ...failure('aborted').error, targetChanged: true } });
 });
 
 it('API応答を待たず対象削除と再選択を完了し旧世代の結果を新bindingへ反映しない', async () => {
@@ -889,16 +1191,16 @@ it('API応答を待たず対象削除と再選択を完了し旧世代の結果�
   expect(values['youtube.monitorBinding']).toBeUndefined();
   expect(await handler.handle(open, popup)).toMatchObject({ ok: true });
   finish.resolve({ ok: true, value: { liveChatId: 'old-generation-chat' } });
-  expect(await request).toEqual(failure('aborted'));
+  expect(await request).toEqual({ ...failure('aborted'), error: { ...failure('aborted').error, targetChanged: true } });
   expect(values['youtube.monitorBinding']).toEqual({ monitorTabId: 10, targetTabId: 9, videoId: open.videoId });
 });
 
 it('popupの対象tabを照合してキーなしbindingを作り、monitorだけが一回取得できる', async () => {
   const { handler, deps, advance } = setup();
   expect(await handler.handle(open, popup)).toMatchObject({ ok: true });
-  expect(await handler.handle({ type: 'youtube.status' }, monitor)).toEqual({ ok: true, value: { videoId: 'abcdefghijk', targetTabId: 9, credentialsAvailable: true } });
+  expect(await handler.handle({ type: 'youtube.status' }, monitor)).toMatchObject({ ok: true, value: { videoId: 'abcdefghijk', targetTabId: 9, credentialsAvailable: true, waitMillis: 0, paused: false } });
   expect(await handler.handle({ type: 'youtube.resolve', requestId: 'request-1', videoId: 'abcdefghijk' }, monitor))
-    .toEqual({ ok: true, value: { liveChatId: 'chat-1', broadcasterChannelId: 'UC0000000000000000000000' } });
+    .toEqual({ ok: true, value: { liveChatId: 'chat-1', broadcasterChannelId: 'UC0000000000000000000000', jevEnabled: false } });
   expect(deps.client.resolveVideo).toHaveBeenCalledWith('abcdefghijk', 'fixture-key', expect.any(AbortSignal));
   advance(5000);
   expect(await handler.handle({ type: 'youtube.list', requestId: 'request-2', liveChatId: 'chat-1' }, monitor)).toMatchObject({ ok: true });
@@ -922,11 +1224,13 @@ it('worker再作成・再開でもsession cooldownと直近intervalを継承す�
   await handler.handle(open, popup);
   await handler.handle({ type: 'youtube.resolve', requestId: 'request-1', videoId: 'abcdefghijk' }, monitor);
   const nextWorker = createYouTubeHandler(deps);
-  expect(await nextWorker.handle({ type: 'youtube.list', requestId: 'request-2', liveChatId: 'chat-1' }, monitor)).toEqual(failure('rateLimited', 5000));
+  expect(await nextWorker.handle({ type: 'youtube.list', requestId: 'request-2', liveChatId: 'chat-1' }, monitor))
+    .toEqual({ ok: false, error: { ...failure('rateLimited', 5000).error, waitRequired: true } });
   advance(5000);
   await nextWorker.handle({ type: 'youtube.list', requestId: 'request-3', liveChatId: 'chat-1' }, monitor);
   advance(5000);
-  expect(await createYouTubeHandler(deps).handle({ type: 'youtube.list', requestId: 'request-4', liveChatId: 'chat-1' }, monitor)).toEqual(failure('rateLimited', 3000));
+  expect(await createYouTubeHandler(deps).handle({ type: 'youtube.list', requestId: 'request-4', liveChatId: 'chat-1' }, monitor))
+    .toEqual({ ok: false, error: { ...failure('rateLimited', 3000).error, waitRequired: true } });
   expect(deps.client.listMessages).toHaveBeenCalledTimes(1);
 });
 
@@ -942,6 +1246,8 @@ it('キー差替え/削除はAbortし遅延結果を返さず、動画遷移で�
   expect((deps.client.resolveVideo.mock.calls[0][2] as AbortSignal).aborted).toBe(true);
   finish({ ok: true, value: { liveChatId: 'stale' } });
   expect(await request).toEqual(failure('aborted'));
+  expect(await handler.handle({ type: 'youtube.resolve', requestId: 'still-stopped', videoId: open.videoId }, monitor)).toEqual(failure('aborted'));
+  expect(await handler.handle({ type: 'youtube.start', videoId: open.videoId, explicit: true }, monitor)).toEqual({ ok: true });
   deps.tabs.get.mockResolvedValue({ id: 9, url: 'https://www.youtube.com/watch?v=zyxwvutsrqp' });
   expect(await handler.handle({ type: 'youtube.resolve', requestId: 'request-2', videoId: 'abcdefghijk' }, monitor)).toEqual(failure('invalidInput'));
 });

@@ -179,7 +179,9 @@ void createModerationTransport(runtime).stop(true);
 let available = false;
 let validTarget = false;
 let initializationGeneration = 0;
+let followIntent = false;
 const monitor = createChatMonitor({ transport: createRuntimeTransport(),
+  onResolved: active => jev.resolved(active),
   onMessages: batch => {
     for (const message of batch) {
       const item = document.createElement('li');
@@ -205,8 +207,9 @@ const monitor = createChatMonitor({ transport: createRuntimeTransport(),
     hidden.refresh();
   },
   onState: state => {
-    start.disabled = state.status === 'running' || !available || !validTarget;
-    stop.disabled = state.status !== 'running';
+    if (state.status === 'error' || state.status === 'ended') { followIntent = false; jev.stop(undefined, true); }
+    start.disabled = followIntent || state.status === 'running' || !available || !validTarget;
+    stop.disabled = !followIntent && state.status !== 'running';
     // This local retention failure shares unavailable with provider outages. Match only
     // the known fixed context; never render arbitrary transport error.message text.
     const overflow = state.error?.code === 'unavailable' && state.error.message === 'コメントが多く、取得を停止しました。未処理のコメントは未判定です。60秒後に「取得を開始」を押してください。';
@@ -216,24 +219,27 @@ const monitor = createChatMonitor({ transport: createRuntimeTransport(),
   },
 });
 start.addEventListener('click', () => monitor.start());
-stop.addEventListener('click', () => { jev.stop(undefined, true); monitor.stop(); });
+stop.addEventListener('click', () => { followIntent = false; jev.stop(undefined, true); monitor.stop(); });
 // hiddenだけでは停止しない。YouTube視聴中の継続がこの機能の目的。
-window.addEventListener('pagehide', () => { jev.stop(undefined, true); monitor.stop(); });
+window.addEventListener('pagehide', () => { followIntent = false; jev.stop(undefined, true); monitor.stop(); });
 runtime.onMessage.addListener((message, sender) => {
   if (sender.id !== runtime.id || (sender.url !== undefined && sender.url !== runtime.getURL('background.js'))
     || typeof message !== 'object' || message === null || !('type' in message)) return false;
   if (message.type === 'hidden.scopeChanged') hidden.refresh(true);
   if (message.type === 'hidden.clearing' || message.type === 'hidden.refresh') {
+    followIntent = false;
     jev.stop(t('clearJevStop'), true);
     monitor.credentialsChanged(available);
     hidden.refresh(message.type === 'hidden.clearing');
     status.textContent = t('clearCollectionStop');
   }
   if (message.type === 'confirmation.changed') {
+    followIntent = false;
     monitor.stop(); jev.stop(t('confirmationRequired'), true);
     status.textContent = t('agreementChanged');
   }
   if (message.type === 'youtube.credentialsChanged' && 'available' in message && typeof message.available === 'boolean') {
+    followIntent = false;
     jev.stop(t('youtubeKeyJevStop'), true);
     initializationGeneration++;
     available = message.available;
@@ -241,26 +247,31 @@ runtime.onMessage.addListener((message, sender) => {
     status.textContent = t(available ? 'youtubeKeyChanged' : 'youtubeKeyMissingStop');
   }
   if (message.type === 'youtube.targetChanged') {
+    followIntent = followIntent || monitor.isRunning();
     for (const row of retained) jev.remove(row.item);
     retained.length = 0;
     anchors = [];
     followLatest = true;
     hidden.setVideo(undefined);
-    jev.stop(); jev.setTarget(false);
-    initializationGeneration++;
+    jev.resetTarget();
     validTarget = false;
     monitor.setVideo(undefined);
     start.disabled = true;
     target.textContent = t('targetChanged');
+    void initializeTarget();
   }
   if (message.type === 'jev.credentialsChanged') jev.stop(t('jevKeyChanged'));
   return false;
 });
-void (async () => {
-  const generation = initializationGeneration;
+async function initializeTarget() {
+  const generation = ++initializationGeneration;
   try {
     const response = await runtime.sendMessage({ type: 'youtube.status' });
     if (generation !== initializationGeneration) return;
+    if (typeof response === 'object' && response !== null && 'ok' in response && response.ok === false
+      && 'error' in response && typeof response.error === 'object' && response.error !== null
+      && 'code' in response.error && response.error.code === 'aborted'
+      && 'targetChanged' in response.error && response.error.targetChanged === true) return;
     if (typeof response !== 'object' || response === null || !('ok' in response) || response.ok !== true
       || !('value' in response) || typeof response.value !== 'object' || response.value === null
       || !('videoId' in response.value) || typeof response.value.videoId !== 'string'
@@ -273,8 +284,16 @@ void (async () => {
     monitor.credentialsChanged(available);
     jev.setTarget(true);
     status.textContent = t(available ? 'readyCollection' : 'youtubeKeyMissing');
+    const resume = followIntent && !('paused' in response.value && response.value.paused === true);
+    followIntent = false;
+    if (resume) monitor.start(false);
+    else { start.disabled = !available; stop.disabled = true; }
   } catch {
     if (generation !== initializationGeneration) return;
+    followIntent = false; validTarget = false;
+    monitor.setVideo(undefined); jev.resetTarget(); hidden.setVideo(undefined);
+    start.disabled = true; stop.disabled = true;
     status.textContent = t('selectVideo');
   }
-})();
+}
+void initializeTarget();

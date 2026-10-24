@@ -1,4 +1,4 @@
-import { test, expect, chromium, type Page } from '@playwright/test';
+import { test, expect, chromium, type Page, type Worker } from '@playwright/test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -6,11 +6,11 @@ import { keys } from '../tests/fixtures/jev';
 
 declare const chrome: { runtime: { sendMessage(message: unknown): Promise<unknown> } };
 declare const monitorFixture: { append(): void; appendMany(count: number): void; hold(): void; release(): void; requests(): number; hide(ids?: string[]): void;
-  holdHidden(): void; releaseHidden(): void; failHidden(value: boolean): void; avatars(): void };
+  holdHidden(): void; releaseHidden(): void; failHidden(value: boolean): void; avatars(): void; setTarget(video: string, pending?: boolean): void };
 const authorId = (id: string) => `UC${id.padEnd(22, '_')}`;
 
 // Assigned UI fixture results, not live API output or model accuracy measurements.
-async function withMonitor(run: (page: Page) => Promise<void>, locale = 'ja') {
+async function withMonitor(run: (page: Page, worker: Worker) => Promise<void>, locale = 'ja') {
   const profile = await mkdtemp(join(tmpdir(), 'agent-moderator-monitor-ui-'));
   const extension = resolve('dist');
   const context = await chromium.launchPersistentContext(profile, {
@@ -27,6 +27,7 @@ async function withMonitor(run: (page: Page) => Promise<void>, locale = 'ja') {
       let held: Promise<void> | undefined;
       let release = () => {};
       let requests = 0;
+      let video = 'abcdefghijk'; let targetPending = false;
       let hidden: string[] = [];
       let hiddenHeld: Promise<void> | undefined; let releaseHidden = () => {}; let hiddenFailure = false;
       const special = ['zero', 'rounded', 'bad', 'disabled', 'burst', 'missing', 'failed'];
@@ -39,6 +40,7 @@ async function withMonitor(run: (page: Page) => Promise<void>, locale = 'ja') {
         type: 'textMessageEvent' });
       let queued = [...special, ...Array.from({ length: 45 }, (_, i) => `initial-${i}`)].map(message);
       Object.assign(globalThis, { monitorFixture: {
+        setTarget(value: string, pending = false) { video = value; targetPending = pending; },
         avatars() { avatars = true; queued = queued.map(post => ({ ...message(post.id), authorDisplayName: `${'さくら Sakura'.repeat(20)} ${post.id}`, text: '配信を楽しみにしています Thank you for the stream! '.repeat(40) })); },
         append() { queued = [message(`new-${++batch}`)]; },
         appendMany(count: number) { queued = Array.from({ length: count }, () => message(`new-${++batch}`)); },
@@ -52,14 +54,15 @@ async function withMonitor(run: (page: Page) => Promise<void>, locale = 'ja') {
       } });
       chrome.runtime.sendMessage = async request => {
         const value = request as { type: string; id: string; authorChannelId: string };
-        if (value.type === 'youtube.status') return { ok: true, value: { videoId: 'abcdefghijk', credentialsAvailable: true } };
+        if (value.type === 'youtube.status') return targetPending ? { ok: false, error: { code: 'aborted', targetChanged: true } }
+          : { ok: true, value: { videoId: video, credentialsAvailable: true } };
         if (value.type === 'youtube.resolve') return { ok: true, value: { liveChatId: 'fixture' } };
         if (value.type === 'youtube.list') {
           const messages = queued; queued = [];
           return { ok: true, value: { messages, nextPageToken: 'next', pollingIntervalMillis: 5000, ended: false } };
         }
         if (value.type === 'hidden.list') {
-          const result = { ok: true, videoId: 'abcdefghijk', ids: hidden,
+          const result = { ok: true, videoId: video, ids: hidden,
             authors: hidden.map(authorChannelId => ({ authorChannelId, displayName: names[authorChannelId.slice(2).replace(/_+$/, '')] ?? 'チャット参加者' })) };
           await hiddenHeld; if (hiddenFailure) throw new Error('synthetic-storage-failure'); return result;
         }
@@ -83,9 +86,26 @@ async function withMonitor(run: (page: Page) => Promise<void>, locale = 'ja') {
       };
     }, [...keys]);
     await page.goto(`chrome-extension://${new URL(worker.url()).hostname}/monitor.html`);
-    await run(page);
+    await run(page, worker);
   } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
 }
+
+test('切替通知後のstatusが次のnavで保留されてもStopを維持し最終対象へ自動追従する', async () => {
+  await withMonitor(async (page, worker) => {
+    await page.getByRole('button', { name: '取得を開始', exact: true }).click();
+    await page.clock.runFor(5100);
+    await page.evaluate(() => monitorFixture.setTarget('zyxwvutsrqp', true));
+    await worker.evaluate(() => chrome.runtime.sendMessage({ type: 'youtube.targetChanged' }));
+    await expect(page.getByRole('button', { name: '取得を停止', exact: true })).toBeEnabled();
+    await page.evaluate(() => monitorFixture.setTarget('finalvideo1'));
+    await worker.evaluate(() => chrome.runtime.sendMessage({ type: 'youtube.targetChanged' }));
+    await expect(page.locator('.viewer-header')).toContainText('finalvideo1');
+    await expect(page.getByRole('button', { name: '取得を停止', exact: true })).toBeEnabled();
+    await page.getByRole('button', { name: '取得を停止', exact: true }).click();
+    await page.clock.runFor(30000);
+    await expect(page.getByRole('button', { name: '取得を開始', exact: true })).toBeEnabled();
+  });
+});
 
 async function collect(page: Page) {
   await page.getByRole('button', { name: 'Jev判定を有効化・再開' }).click();

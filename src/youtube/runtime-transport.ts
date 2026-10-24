@@ -35,7 +35,14 @@ export function createRuntimeTransport(): ChatTransport {
     finally { clearTimeout(timeout); signal.removeEventListener('abort', cancel); }
   }
   return {
-    resolveVideo: (videoId, signal) => request<{ liveChatId: string }>({ type: 'youtube.resolve', videoId }, signal),
+    startCollection: (videoId, explicit, signal) => request({ type: 'youtube.start', videoId, explicit }, signal),
+    async readiness(signal) {
+      const result = await request<{ waitMillis?: number }>({ type: 'youtube.status' }, signal);
+      if (!result.ok) return result;
+      const wait = result.value.waitMillis;
+      return { ok: true, value: { waitMillis: typeof wait === 'number' && Number.isFinite(wait) && wait >= 0 ? wait : 0 } };
+    },
+    resolveVideo: (videoId, signal) => request<{ liveChatId: string; jevEnabled?: boolean }>({ type: 'youtube.resolve', videoId }, signal),
     async listMessages(liveChatId, pageToken, signal) {
       const result = await request<ChatPage>({ type: 'youtube.list', liveChatId, pageToken }, signal);
       if (!result.ok) return result;
