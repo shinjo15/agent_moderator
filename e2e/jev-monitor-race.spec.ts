@@ -17,13 +17,16 @@ for (const scenario of ['oldDisabled', 'stop', 'keyChange'] as const) {
       await page.addInitScript(() => {
         let listener!: (message: unknown, sender: Sender) => boolean;
         let finish!: (value: unknown) => void;
+        let enabled = false;
         const pending = new Promise(resolve => { finish = resolve; });
         chrome.runtime.onMessage.addListener = value => { listener = value; };
         chrome.runtime.sendMessage = async message => {
           const value = message as { type: string };
+          if (value.type === 'jev.enable') { enabled = true; return { ok: true }; }
+          if (value.type === 'jev.disable' || value.type === 'jev.stopCollection') { enabled = false; return { ok: true }; }
           if (value.type === 'youtube.status') return { ok: true, value: { videoId: 'abcdefghijk', credentialsAvailable: true } };
           if (value.type === 'hidden.list') return { ok: true, videoId: 'abcdefghijk', ids: [] };
-          if (value.type === 'youtube.resolve') return { ok: true, value: { liveChatId: 'fixture' } };
+          if (value.type === 'youtube.resolve') return { ok: true, value: { liveChatId: 'fixture', jevEnabled: enabled } };
           if (value.type === 'youtube.list') return { ok: true, value: { messages: [{ id: 'one', authorChannelId: 'author', text: '批判fixture', type: 'textMessageEvent' }], nextPageToken: 'next', pollingIntervalMillis: 5000, ended: false } };
           if (value.type === 'jev.evaluate') return pending;
           return { ok: true };
@@ -31,7 +34,7 @@ for (const scenario of ['oldDisabled', 'stop', 'keyChange'] as const) {
         Object.assign(globalThis, { jevRace: {
           evaluate: () => pending,
           async release(value: unknown) { finish(value); await pending; },
-          notify() { listener({ type: 'jev.credentialsChanged' }, { id: chrome.runtime.id, url: chrome.runtime.getURL('background.js') }); },
+          notify() { enabled = false; listener({ type: 'jev.credentialsChanged' }, { id: chrome.runtime.id, url: chrome.runtime.getURL('background.js') }); },
         } });
       });
       await page.goto(`chrome-extension://${id}/monitor.html`);

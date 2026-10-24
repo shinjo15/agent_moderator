@@ -18,7 +18,8 @@ for (const locale of ['ja', 'en']) {
       await page.clock.install();
       await page.addInitScript(() => {
         chrome.runtime.sendMessage = async message => {
-          const request = message as { type: string };
+          const request = message as { type: string; videoId?: string; explicit?: boolean };
+          if (request.type === 'youtube.start') return { ok: request.videoId === 'abcdefghijk' && request.explicit === true };
           if (request.type === 'youtube.status') return { ok: true, value: { videoId: 'abcdefghijk', credentialsAvailable: true } };
           if (request.type === 'youtube.resolve') return { ok: true, value: { liveChatId: 'fixture' } };
           if (request.type === 'youtube.list') return { ok: true, value: { messages: Array.from({ length: 10001 }, (_, i) => ({ id: `overflow-${i}`, authorChannelId: 'UCaaaaaaaaaaaaaaaaaaaaaa', text: '投稿本文', type: 'textMessageEvent' })), nextPageToken: 'next', pollingIntervalMillis: 5000, ended: false } };

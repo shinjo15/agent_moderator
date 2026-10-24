@@ -18,17 +18,19 @@ const moderation = createModeration({ client: createJevClient(), readKey: readJe
 const hiddenAuthors = createHiddenAuthors({ storage: platform.storage.local, initialize: initializeCredentialStorage });
 const youtube = createYouTubeHandler({ session: platform.storage.session, tabs: platform.tabs, windows: platform.windows, runtime, moderation, readConfirmation: confirmation.read,
   hiddenAuthors, client: createYouTubeClient(), initialize: initializeCredentialStorage, readApiKey: readYouTubeApiKeyForBackground });
-const hidden = createHiddenAuthorHandler({ store: hiddenAuthors, tabs: platform.tabs, session: platform.storage.session, runtime, clearAll: youtube.clearHiddenData });
+const hidden = createHiddenAuthorHandler({ store: hiddenAuthors, tabs: platform.tabs, session: platform.storage.session, runtime,
+  clearAll: youtube.clearHiddenData, currentTargetEpoch: youtube.targetEpoch });
 platform.storage.onChanged?.addListener((changes, area) => {
   if (area === 'local' && CONFIRMATION_KEY in changes) void youtube.confirmationChanged().catch(() => {});
   if (area === 'local' && 'apiKey.youtube' in changes) void youtube.credentialsChanged().catch(() => {});
   if (area === 'local' && 'apiKey.jev' in changes) {
-    moderation.stop();
+    youtube.stopJev();
     void runtime.sendMessage({ type: 'jev.credentialsChanged' }).catch(() => {});
   }
 });
 platform.tabs?.onUpdated?.addListener((id, change) => {
   if (change.url !== undefined) void youtube.targetChanged(id, change.url).catch(() => {});
+  else if (change.status !== undefined) void youtube.targetUpdated(id).catch(() => {});
 });
 platform.tabs?.onRemoved?.addListener(id => { void youtube.targetChanged(id).catch(() => {}); });
 

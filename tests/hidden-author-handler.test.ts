@@ -12,8 +12,9 @@ it('scopeはtrusted bindingからのみ決定し、未解決/不正/偽装scope/
   const store = createHiddenAuthors({ storage, initialize: async () => {} }); await store.add(channel, author, 0);
   const binding: Record<string, unknown> = { monitorTabId: 10, targetTabId: 9, videoId };
   values['youtube.monitorBinding'] = binding;
+  let targetEpoch: number | undefined = 0;
   const handler = createHiddenAuthorHandler({ store, session: storage, tabs: { get: async () => ({ url: `https://www.youtube.com/watch?v=${videoId}` }) },
-    runtime: { id: 'test', getURL: p => `chrome-extension://test/${p}` } });
+    runtime: { id: 'test', getURL: p => `chrome-extension://test/${p}` }, currentTargetEpoch: () => targetEpoch });
   const sender = { id: 'test', url: 'chrome-extension://test/monitor.html', tab: { id: 10 } };
   expect(await handler.handle({ type: 'hidden.list', videoId }, sender)).toMatchObject({ ok: false });
   binding.broadcasterChannelId = 'invalid';
@@ -23,6 +24,25 @@ it('scopeはtrusted bindingからのみ決定し、未解決/不正/偽装scope/
   expect(await handler.handle({ type: 'hidden.list', videoId, broadcasterChannelId: 'UC1111111111111111111111' }, sender)).toEqual({ ok: false });
   expect(await handler.handle({ type: 'hidden.list', videoId: 'zyxwvutsrqp' }, sender)).toEqual({ ok: false });
   expect(await handler.handle({ type: 'hidden.list', videoId }, { ...sender, tab: { id: 11 } })).toEqual({ ok: false });
+  targetEpoch = undefined;
+  expect(await handler.handle({ type: 'hidden.list', videoId }, sender)).toEqual({ ok: false });
+});
+
+it('A→B→Aで同じscopeに戻っても旧binding世代の解除を再認可しない', async () => {
+  const videoId = 'abcdefghijk'; const author = 'UCabcdefghijklmnopqrstuv';
+  const values: Record<string, unknown> = { 'youtube.monitorBinding': { monitorTabId: 10, targetTabId: 9, videoId, broadcasterChannelId, liveChatId: 'chat', revision: 'old-A' } };
+  const storage = { get: async (keys: string[]) => Object.fromEntries(keys.map(k => [k, structuredClone(values[k])])),
+    set: async (data: Record<string, unknown>) => { Object.assign(values, structuredClone(data)); } };
+  const store = createHiddenAuthors({ storage, initialize: async () => {} }); await store.add(broadcasterChannelId, author, 0);
+  let enter!: () => void; let release!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; }); const gate = new Promise<void>(resolve => { release = resolve; });
+  const tabs = { get: vi.fn(async () => { enter(); await gate; return { url: `https://www.youtube.com/watch?v=${videoId}` }; }) };
+  const handler = createHiddenAuthorHandler({ store, session: storage, tabs, runtime: { id: 'test', getURL: p => `chrome-extension://test/${p}` } });
+  const removing = handler.handle({ type: 'hidden.remove', videoId, authorChannelId: author }, { id: 'test', url: 'chrome-extension://test/monitor.html', tab: { id: 10 } });
+  await entered;
+  values['youtube.monitorBinding'] = { ...(values['youtube.monitorBinding'] as object), revision: 'new-A' };
+  release(); expect(await removing).toEqual({ ok: false });
+  expect(await store.list(broadcasterChannelId)).toEqual([author]); expect(await store.revision(broadcasterChannelId, author)).toBe(0);
 });
 
 it('全削除はexact optionsの単一payloadだけ許可し、失敗/秘密を成功応答にしない', async () => {
