@@ -32,7 +32,7 @@ test('production MV3: activeTabから選択しYouTubeタブ前面でもfixture�
       expect(['fixture-not-real-key', 'fixture-replacement']).toContain(url.searchParams.get('key'));
       if (url.pathname.endsWith('/videos')) {
         videoCalls++;
-        await route.fulfill({ json: { items: [{ id: 'abcdefghijk', liveStreamingDetails: { activeLiveChatId: 'fixture-chat' } }] } });
+        await route.fulfill({ json: { items: [{ id: 'abcdefghijk', snippet: { channelId: 'UC0000000000000000000000' }, liveStreamingDetails: { activeLiveChatId: 'fixture-chat' } }] } });
       } else {
         tokens.push(url.searchParams.get('pageToken')); callTimes.push(Date.now());
         if (mode === 'quota') {

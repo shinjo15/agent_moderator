@@ -2,7 +2,7 @@ import type { MessageSender } from './extension-runtime';
 import { createBoundedQueue } from './retention';
 
 // Bump when the explained usage/data conditions change; old confirmations never migrate automatically.
-export const CONFIRMATION_VERSION = 2;
+export const CONFIRMATION_VERSION = 3;
 export const CONFIRMATION_KEY = 'usage.confirmation';
 export const confirmationRequired = '設定で利用規約案・プライバシーポリシー案とデータの扱いに同意してください。同意できるまで外部送信しません。';
 type Storage = { get(keys: string[]): Promise<Record<string, unknown>>; set(values: Record<string, unknown>): Promise<void> };

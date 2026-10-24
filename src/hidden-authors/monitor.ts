@@ -21,6 +21,8 @@ export function createHiddenAuthorPanel(main: HTMLElement, transport: Pick<typeo
   const snapshot = createHiddenAuthorSnapshot({ read: selected => transport.sendMessage({ type: 'hidden.list', videoId: selected }), changed(state) {
       changed();
       retry.hidden = state.status !== 'error';
+      list.hidden = state.status !== 'ready';
+      empty.hidden = state.status !== 'ready' || state.authors.length > 0;
       if (state.status !== 'ready') { status.textContent = t(state.status === 'error' ? 'hiddenListFailure' : video ? 'checkingList' : 'selectStream'); return; }
       const current = generation; const selected = video;
       const authors = state.authors;

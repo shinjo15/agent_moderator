@@ -9,7 +9,7 @@ const video = 'abcdefghijk';
 const a = 'UCabcdefghijklmnopqrstuv'; const b = 'UCzyxwvutsrqponmlkjihgfe';
 const c = `UC${'c'.repeat(22)}`; const legacy = `UC${'d'.repeat(22)}`;
 const longName = 'さくら <img src=x onerror=alert(1)> ' + 'はるかぜ'.repeat(200);
-const key = `hiddenAuthors.${video}`;
+const key = 'hiddenAuthors.channel.UC0000000000000000000000';
 const label = (name: string, id: string) => `${name}（投稿者ID：${id}）の非表示を解除`;
 declare const nameFixture: { fault(value: string): void; legacy(): void };
 async function openMonitor(context: BrowserContext, extensionId: string): Promise<{ monitor: Page; watch: Page }> {
@@ -41,7 +41,7 @@ test('MV3 names: 公式応答fixture→判定→名前永続→browser再起動�
   try {
     context = await launch();
     const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker'); const id = new URL(worker.url()).hostname;
-    await worker.evaluate(({ key, legacy }) => chrome.storage.local.set({ [key]: { ids: [legacy], revisions: { [legacy]: 7 } } }), { key, legacy });
+    await worker.evaluate(({ video, legacy }) => chrome.storage.local.set({ [`hiddenAuthors.${video}`]: { ids: [legacy], revisions: { [legacy]: 7 } } }), { video, legacy });
     await routeWatch(context);
     const requests: string[] = []; let pages = 0; let renamed = false; let jevCalls = 0;
     const avatarRequests: string[] = [];
@@ -53,7 +53,7 @@ test('MV3 names: 公式応答fixture→判定→名前永続→browser再起動�
     await context.route('https://www.googleapis.com/youtube/v3/**', route => {
       const url = new URL(route.request().url()); requests.push(url.pathname);
       expect(url.searchParams.has('fields')).toBe(false);
-      if (url.pathname.endsWith('/videos')) return route.fulfill({ json: { items: [{ id: video, liveStreamingDetails: { activeLiveChatId: 'synthetic-chat' } }] } });
+      if (url.pathname.endsWith('/videos')) return route.fulfill({ json: { items: [{ id: video, snippet: { channelId: 'UC0000000000000000000000' }, liveStreamingDetails: { activeLiveChatId: 'synthetic-chat' } }] } });
       expect(url.pathname).toBe('/youtube/v3/liveChat/messages'); expect(url.searchParams.get('part')).toBe('id,snippet,authorDetails');
       const posts = renamed ? [[a, 'みどりの庭', '落ち着いたコメント']] : [[a, 'みどり', '宣伝を繰り返す'], [b, 'みどり', '今日も楽しみです'], [c, longName, '攻撃的なコメント']];
       return route.fulfill({ json: { nextPageToken: `next-${++pages}`, pollingIntervalMillis: 5000, items: posts.map(([channelId, displayName, text], n) => ({
@@ -76,7 +76,8 @@ test('MV3 names: 公式応答fixture→判定→名前永続→browser再起動�
     }
     const { monitor, watch } = await openMonitor(context, id);
     const frame = watch.frames().find(f => f.url().includes('/live_chat'))!;
-    await expect(monitor.locator('#hidden-authors .author-name')).toHaveText('名前不明');
+    await expect(monitor.locator('#hidden-authors .author-name')).toHaveCount(0);
+    await expect(monitor.locator('.chat-scroll .empty-list')).toContainText('配信者');
     await monitor.getByRole('button', { name: 'Jev判定を有効化・再開' }).click();
     await expect(monitor.getByTestId('jev-status')).toContainText('有効');
     await monitor.getByRole('button', { name: '取得を開始', exact: true }).click();
@@ -105,7 +106,7 @@ test('MV3 names: 公式応答fixture→判定→名前永続→browser再起動�
     await monitor.getByRole('button', { name: '取得を停止', exact: true }).click();
     expect(jevCalls).toBe(3); expect(requests.filter(p => p.endsWith('/videos'))).toHaveLength(1);
     const persisted = await worker.evaluate(async key => (await chrome.storage.local.get([key]))[key], key);
-    expect(persisted).toEqual({ ids: [a, c], revisions: { [legacy]: 8 }, displayNames: { [a]: 'みどりの庭', [c]: longName } });
+    expect(persisted).toEqual({ ids: [a, c], revisions: { [legacy]: 1 }, displayNames: { [a]: 'みどりの庭', [c]: longName }, migratedVideos: [video] });
     expect(JSON.stringify(await worker.evaluate(() => chrome.storage.local.get(null)))).not.toContain('yt3.');
     await context.close(); context = await launch();
     const restarted = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');

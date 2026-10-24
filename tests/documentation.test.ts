@@ -2,6 +2,19 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { expect, it } from 'vitest';
 
+it('配信者scope・遅延移行・解除保護と版3再同意を日英UIと既存文書へ説明する', () => {
+  for (const locale of ['ja', 'en']) {
+    const messages = JSON.parse(readFileSync(`public/_locales/${locale}/messages.json`, 'utf8'));
+    expect(messages.hiddenStorage.message).toContain(locale === 'ja' ? '配信者' : 'broadcaster');
+    expect(messages.unhideNote.message).toContain(locale === 'ja' ? '別ライブ' : 'other live');
+    expect(messages.termsFunction.message).toContain(locale === 'ja' ? '配信者' : 'broadcaster');
+  }
+  const privacy = readFileSync('docs/privacy.md', 'utf8');
+  for (const token of ['hiddenAuthors.channel.', 'migratedVideos', '遅延移行', '版3', '旧形式']) expect(privacy).toContain(token);
+  expect(readFileSync('docs/onboarding.md', 'utf8')).toContain('同じ配信者の別ライブ');
+  expect(readFileSync('docs/terms.md', 'utf8')).toContain('配信者');
+});
+
 it('READMEから日本語導入手順へ辿れ、導入手順のローカルリンクが存在する', () => {
   const entry = 'docs/onboarding.md';
   expect(readFileSync('README.md', 'utf8')).toContain(`](${entry})`);

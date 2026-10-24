@@ -23,13 +23,22 @@ export function createHiddenAuthorHandler({ store, tabs, session, runtime, clear
     if (!Number.isSafeInteger(tab?.id) || !validVideo(m.videoId)) return denied;
     try {
       if (sender.url === runtime.getURL('monitor.html')) {
-        const binding = (await session.get(['youtube.monitorBinding']))['youtube.monitorBinding'] as { monitorTabId?: number; videoId?: string; targetTabId: number } | undefined;
+        const binding = (await session.get(['youtube.monitorBinding']))['youtube.monitorBinding'] as { monitorTabId?: number; videoId?: string; targetTabId: number; broadcasterChannelId?: string; liveChatId?: string } | undefined;
         if (!binding || binding.monitorTabId !== tab!.id || binding.videoId !== m.videoId
           || videoIdFromUrl((await tabs.get(binding.targetTabId)).url) !== m.videoId) return denied;
         if (!admitted || !store.isCurrent(epoch)) return denied;
-        if (m.type === 'hidden.remove' && Object.keys(m).length === 3 && validAuthor(m.authorChannelId)) await store.remove(m.videoId, m.authorChannelId, true);
-        else if (m.type !== 'hidden.list' || Object.keys(m).length !== 2) return denied;
-        const authors = await store.listAuthors(m.videoId);
+        if (m.type === 'hidden.remove' ? Object.keys(m).length !== 3 || !validAuthor(m.authorChannelId)
+          : m.type !== 'hidden.list' || Object.keys(m).length !== 2) return denied;
+        if (!validAuthor(binding.broadcasterChannelId)) return { ok: false, code: 'scopeUnresolved' };
+        const current = async () => {
+          const latest = (await session.get(['youtube.monitorBinding']))['youtube.monitorBinding'] as typeof binding;
+          return latest?.monitorTabId === binding.monitorTabId && latest.targetTabId === binding.targetTabId && latest.videoId === binding.videoId
+            && latest.broadcasterChannelId === binding.broadcasterChannelId && latest.liveChatId === binding.liveChatId
+            && videoIdFromUrl((await tabs.get(binding.targetTabId)).url) === m.videoId && store.isCurrent(epoch);
+        };
+        if (m.type === 'hidden.remove') await store.remove(binding.broadcasterChannelId, m.authorChannelId as string, true, current);
+        const authors = await store.listAuthors(binding.broadcasterChannelId);
+        if (!await current()) return denied;
         return { ok: true, videoId: m.videoId, ids: authors.map(author => author.authorChannelId), authors };
       }
       return denied;

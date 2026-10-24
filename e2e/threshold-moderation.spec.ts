@@ -32,7 +32,7 @@ test('MV3 threshold: 実policy/runtime/非表示・0/1・遅延snapshot/cached�
     let calls = 0;
     await context.route('https://www.googleapis.com/youtube/v3/**', route => {
       const url = new URL(route.request().url());
-      return route.fulfill({ json: url.pathname.endsWith('/videos') ? { items: [{ id: video, liveStreamingDetails: { activeLiveChatId: 'fixture-chat' } }] }
+      return route.fulfill({ json: url.pathname.endsWith('/videos') ? { items: [{ id: video, snippet: { channelId: 'UC0000000000000000000000' }, liveStreamingDetails: { activeLiveChatId: 'fixture-chat' } }] }
         : { nextPageToken: `next-${index}`, pollingIntervalMillis: 5000, items: [{ id: `post-${index}`, snippet: { type: 'textMessageEvent', hasDisplayContent: true,
           displayMessage: `API fixture ${index}`, publishedAt: new Date().toISOString() }, authorDetails: { channelId: authors[index] } }] } });
     });

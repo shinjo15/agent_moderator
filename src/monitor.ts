@@ -222,6 +222,7 @@ window.addEventListener('pagehide', () => { jev.stop(undefined, true); monitor.s
 runtime.onMessage.addListener((message, sender) => {
   if (sender.id !== runtime.id || (sender.url !== undefined && sender.url !== runtime.getURL('background.js'))
     || typeof message !== 'object' || message === null || !('type' in message)) return false;
+  if (message.type === 'hidden.scopeChanged') hidden.refresh(true);
   if (message.type === 'hidden.clearing' || message.type === 'hidden.refresh') {
     jev.stop(t('clearJevStop'), true);
     monitor.credentialsChanged(available);

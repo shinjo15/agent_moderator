@@ -83,7 +83,7 @@ for (const locale of ['ja', 'en', 'fr']) {
       await expect(page.getByRole('heading', { name: locale === 'ja' ? '独立チャットビューアー · YouTube Live' : 'Independent chat viewer · YouTube Live', exact: true })).toBeVisible();
       await expect(page.getByRole('button', { name: locale === 'ja' ? 'Jev判定を有効化・再開' : 'Enable / resume Jev evaluation', exact: true })).toBeVisible();
       await page.getByRole('button', { name: locale === 'ja' ? '非表示一覧' : 'Hidden authors', exact: true }).click();
-      await expect(page.getByRole('heading', { name: locale === 'ja' ? 'この配信の非表示投稿者' : 'Hidden authors in this stream', exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: locale === 'ja' ? 'この配信者の非表示投稿者' : 'Hidden authors for this broadcaster', exact: true })).toBeVisible();
       await layout(page);
       await page.keyboard.press('Escape');
       await page.goto(`chrome-extension://${id}/terms.html`);
@@ -101,7 +101,7 @@ for (const locale of ['ja', 'en', 'fr']) {
       await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: '<h1>YouTube fixture</h1>' }));
       await context.route('https://www.googleapis.com/youtube/v3/**', route => {
         externalRequests++;
-        if (new URL(route.request().url()).pathname.endsWith('/videos')) return route.fulfill({ json: { items: [{ id: 'abcdefghijk', liveStreamingDetails: { activeLiveChatId: 'fixture' } }] } });
+        if (new URL(route.request().url()).pathname.endsWith('/videos')) return route.fulfill({ json: { items: [{ id: 'abcdefghijk', snippet: { channelId: 'UC0000000000000000000000' }, liveStreamingDetails: { activeLiveChatId: 'fixture' } }] } });
         collection++;
         return route.fulfill({ json: { nextPageToken: 'next', pollingIntervalMillis: 5000, items: [{ id: `target-${collection}`, authorDetails: { channelId: 'UCaaaaaaaaaaaaaaaaaaaaaa', displayName: 'あおい / Aoi' }, snippet: { type: 'textMessageEvent', hasDisplayContent: true, displayMessage: '日本語の投稿 Keep original', publishedAt: '2026-01-01T00:00:00.000Z' } }] } });
       });

@@ -16,7 +16,7 @@
 <p class="draft-notice" data-i18n="termsDraft">施行日：未定。本書は開発版での確認・同意のための案であり、正式施行ではありません。一般配布や提供元による用途の承認を意味するものではありません。</p>
 <h2 data-i18n="termsHeading1">1. 本拡張について</h2>
 <p data-i18n="termsAbout">Agent Moderatorは、開発者が私的時間に個人で開発するChrome拡張機能です。Google・YouTube・TypeSafeの公式拡張ではありません。</p>
-<p data-i18n="termsFunction">利用者が選んだYouTubeライブ配信のチャットを公式APIで取得・表示し、任意のJev判定と端末内の連投判定により、対象投稿者を配信別の端末内リストへ保存します。非表示は拡張の独立ビューアーだけに適用します。利用者本人の画面を含め、YouTubeのページ・プレイヤー・標準チャット・リプレイの表示や操作は変更しません。BANや投稿削除は行いません。判定項目・基準や操作の詳細は<a data-link-i18n="onboardingLink" href="https://github.com/shinjo15/agent_moderator/blob/main/docs/onboarding.md" target="_blank" rel="noopener noreferrer">導入・操作手順</a>をご確認ください。</p>
+<p data-i18n="termsFunction">利用者が選んだYouTubeライブ配信のチャットを公式APIで取得・表示し、任意のJev判定と端末内の連投判定により、対象投稿者を配信者のチャンネル別の端末内リストへ保存します。同じ配信者の別ライブに引き継ぎ、他の配信者には適用しません。非表示は拡張の独立ビューアーだけに適用します。利用者本人の画面を含め、YouTubeのページ・プレイヤー・標準チャット・リプレイの表示や操作は変更しません。BANや投稿削除は行いません。判定項目・基準や操作の詳細は<a data-link-i18n="onboardingLink" href="https://github.com/shinjo15/agent_moderator/blob/main/docs/onboarding.md" target="_blank" rel="noopener noreferrer">導入・操作手順</a>をご確認ください。</p>
 <h2 data-i18n="termsHeading2">2. 確認と同意</h2>
 <p data-i18n="termsAgreement">利用規約案・<a data-link-i18n="privacyDraftLink" href="https://github.com/shinjo15/agent_moderator/blob/main/docs/privacy.md" target="_blank" rel="noopener noreferrer">プライバシーポリシー案</a>と、設定画面の送信・費用説明を読み、同意する場合にチェックして「同意を保存」を押してください。同意は開発版の案に対するもので、正式施行や公開承認とは別です。インストール・文書の閲覧・キー保存だけで同意したとは扱いません。</p>
 <p data-i18n="termsGate">未同意の間はYouTube APIによる取得とJev送信を開始できません。同意の保存だけでは取得・判定を自動開始せず、Jevは別途明示的な有効化が必要です。通常のYouTubeページ閲覧はこの同意の対象外です。</p>
@@ -31,7 +31,7 @@
 <p data-i18n="termsLimitations">誤判定や見逃し、取得・通信の失敗、画面反映の遅延があり得ます。判定は投稿者の人格や法的な違法性を確定するものではありません。非表示の対象は一覧から確認・解除できます。実APIでの判定精度・速度等は未検証です。</p>
 <h2 data-i18n="termsHeading6">6. 停止・解除・削除</h2>
 <p data-i18n="termsStopping">「Jev判定を停止」はJev送信を、「取得を停止」は取得と判定を止めます。停止だけでは保存済みの非表示リストを削除しません。解除・全削除では独立画面の保持中の対象行だけ再表示し、失った過去コメントは復元しません。YouTubeの表示は変更しません。</p>
-<p data-i18n="termsDeletion">対象配信の一覧から個別に「非表示を解除」できます。「全配信の非表示データを削除」は非表示ID・名前・解除の世代情報を削除しますが、APIキーなどの設定は残します。設定でのキー削除と、提供元でのキー失効・解約は別です。</p>
+<p data-i18n="termsDeletion">対象配信者の一覧から個別に「非表示を解除」でき、同じ配信者の別ライブにも反映します。「全配信の非表示データを削除」は新旧の非表示ID・名前・解除の世代情報・移行済み動画の記録を削除しますが、APIキーなどの設定は残します。設定でのキー削除と、提供元でのキー失効・解約は別です。</p>
 <p data-i18n="termsUninstall">拡張のアンインストールで拡張の端末内保存を削除できます。これらの操作で、YouTube上の投稿や外部サービスへ送信済みの情報は削除できません。保持範囲と削除手順はプライバシーポリシーをご確認ください。</p>
 <h2 data-i18n="termsHeading7">7. 禁止事項</h2>
 <p data-i18n="termsProhibited">法令や第三者の権利に反する利用、他人のAPIキーの不正使用、提供元の利用制限を回避する行為、第三者を攻撃・嫌がらせするための利用は行わないでください。外部サービスの条件と第三者の権利を尊重してください。</p>

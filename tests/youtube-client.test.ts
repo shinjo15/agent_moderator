@@ -1,6 +1,22 @@
 import { expect, it, vi } from 'vitest';
 import { createYouTubeClient } from '../src/youtube/client';
 
+it('既存videos.listのsnippetで配信者IDを解決し追加通信しない', async () => {
+  const channel = 'UC0000000000000000000000';
+  const fetcher = vi.fn(async (_url: string | URL | Request) => new Response(JSON.stringify({ items: [{ id: 'abcdefghijk',
+    snippet: { channelId: channel }, liveStreamingDetails: { activeLiveChatId: 'chat' } }] })));
+  expect(await createYouTubeClient(fetcher).resolveVideo('abcdefghijk', 'synthetic', new AbortController().signal))
+    .toEqual({ ok: true, value: { liveChatId: 'chat', broadcasterChannelId: channel } });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(new URL(String(fetcher.mock.calls[0][0])).searchParams.get('part')?.split(',').sort()).toEqual(['liveStreamingDetails', 'snippet']);
+});
+
+it.each([undefined, null, '', 'channel-1', ' UC0000000000000000000000', 123])('配信者ID欠落/不正 %j は取得成功にしない', async channelId => {
+  const client = createYouTubeClient(vi.fn(async () => new Response(JSON.stringify({ items: [{ id: 'abcdefghijk',
+    snippet: { channelId }, liveStreamingDetails: { activeLiveChatId: 'chat' } }] }))));
+  expect(await client.resolveVideo('abcdefghijk', 'synthetic', new AbortController().signal)).toMatchObject({ ok: false, error: { code: 'invalidResponse' } });
+});
+
 it('応答待ちの通信は20秒で中断し固定networkエラーで停止する', async () => {
   vi.useFakeTimers();
   try {
@@ -167,14 +183,14 @@ it('listで続きを指定し、本文・投稿者と継続用必須値だけを
 
 it('公開動画からactiveLiveChatIdを取得し、APIキーはGoogleへの要求だけに渡す', async () => {
   const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-    items: [{ id: 'abcdefghijk', liveStreamingDetails: { actualStartTime: '2026-01-01T00:00:00Z', activeLiveChatId: 'chat-1' } }],
+    items: [{ id: 'abcdefghijk', snippet: { channelId: 'UC0000000000000000000000' }, liveStreamingDetails: { actualStartTime: '2026-01-01T00:00:00Z', activeLiveChatId: 'chat-1' } }],
   })));
   const client = createYouTubeClient(fetcher);
   expect(await client.resolveVideo('abcdefghijk', 'fixture-key', new AbortController().signal))
-    .toEqual({ ok: true, value: { liveChatId: 'chat-1' } });
+    .toEqual({ ok: true, value: { liveChatId: 'chat-1', broadcasterChannelId: 'UC0000000000000000000000' } });
   const [url, init] = fetcher.mock.calls[0];
   expect(new URL(url).origin).toBe('https://www.googleapis.com');
-  expect(new URL(url).searchParams.get('part')).toBe('liveStreamingDetails');
+  expect(new URL(url).searchParams.get('part')?.split(',').sort()).toEqual(['liveStreamingDetails', 'snippet']);
   expect(new URL(url).searchParams.get('key')).toBe('fixture-key');
   expect(init.credentials).toBe('omit');
 });

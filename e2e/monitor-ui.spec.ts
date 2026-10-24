@@ -255,7 +255,7 @@ test('monitor UI fixture: 密なコメント・最大スコア/raw・配信別�
     await expect(chat).toBeVisible();
     await expect(page.getByText('コメントはまだありません。', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: '非表示一覧', exact: true }).click();
-    await expect(page.getByText('この配信の非表示投稿者はいません。', { exact: true })).toBeVisible();
+    await expect(page.getByText('この配信者の非表示投稿者はいません。', { exact: true })).toBeVisible();
     await expect(page.locator('#hidden-authors li')).toHaveCount(0);
     await page.keyboard.press('Escape');
     await collect(page);

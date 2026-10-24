@@ -40,9 +40,9 @@ test('MV3利用条件: 掲載案リンク・明示確認・複数設定画面・
     await expect(options.getByTestId('confirmation-status')).toContainText('同意済み');
     await expect(second.getByTestId('confirmation-status')).toContainText('同意済み');
     expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.get' })))
-      .toEqual({ ok: true, value: { confirmed: true, version: 2 } });
+      .toEqual({ ok: true, value: { confirmed: true, version: 3 } });
     expect(await worker.evaluate(async () => (await chrome.storage.local.get(['usage.confirmation']))['usage.confirmation']))
-      .toEqual({ version: 2 });
+      .toEqual({ version: 3 });
     await context.close(); context = await launch();
     worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker'); id = new URL(worker.url()).hostname;
     options = await context.newPage(); await options.goto(`chrome-extension://${id}/options.html`);
@@ -52,10 +52,10 @@ test('MV3利用条件: 掲載案リンク・明示確認・複数設定画面・
     await options.getByRole('button', { name: 'YouTubeキーを削除', exact: true }).click();
     await expect(options.getByTestId('youtube-status')).toContainText('未設定');
     expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.get' }))).toMatchObject({ ok: true, value: { confirmed: true } });
-    await worker.evaluate(() => chrome.storage.local.set({ 'usage.confirmation': { version: 1 } }));
+    await worker.evaluate(() => chrome.storage.local.set({ 'usage.confirmation': { version: 2 } }));
     await expect(options.getByTestId('confirmation-status')).toContainText('未同意');
     await expect(options.getByLabel('利用規約（案）とプライバシーポリシー（案）に同意し、データ送信・費用の説明を確認しました', { exact: true })).not.toBeChecked();
-    expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.confirm', version: 1 }))).toMatchObject({ ok: false });
+    expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.confirm', version: 2 }))).toMatchObject({ ok: false });
   } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
 });
 
@@ -84,13 +84,13 @@ test('確認準備write成功・readback拒否・rollback拒否の後もブラ�
         return get(keys);
       };
     });
-    expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.confirm', version: 2 }))).toMatchObject({ ok: false });
+    expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.confirm', version: 3 }))).toMatchObject({ ok: false });
     expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.get' }))).toMatchObject({ ok: true, value: { confirmed: false } });
     await context.close(); context = await launch();
     worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker'); id = new URL(worker.url()).hostname;
     options = await context.newPage(); await options.goto(`chrome-extension://${id}/options.html`);
     await expect(options.getByTestId('confirmation-status')).toContainText('未同意');
     expect(await worker.evaluate(async () => (await chrome.storage.local.get(['usage.confirmation']))['usage.confirmation'])).toEqual({ version: -1 });
-    expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.confirm', version: 2 }))).toMatchObject({ ok: true, value: { confirmed: true } });
+    expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.confirm', version: 3 }))).toMatchObject({ ok: true, value: { confirmed: true } });
   } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
 });

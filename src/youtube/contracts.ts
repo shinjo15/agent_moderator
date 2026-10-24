@@ -20,6 +20,8 @@ export type ErrorCode = keyof typeof errorMessages;
 export type ChatError = { code: ErrorCode; message: string; retryAfterMillis?: number };
 export type Result<T> = { ok: true; value: T } | { ok: false; error: ChatError };
 export const validDisplayName = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
+export const validChannelId = (value: unknown): value is string => typeof value === 'string' && /^UC[A-Za-z0-9_-]{22}$/.test(value);
+export type ResolvedVideo = { liveChatId: string; broadcasterChannelId: string };
 export function validProfileImageUrl(value: unknown): value is string {
   if (typeof value !== 'string' || !value.startsWith('https://') || /[\s\\]/.test(value)) return false;
   try {
@@ -36,7 +38,7 @@ export type ChatPage = {
   ended: boolean;
 };
 export type YouTubeClient = {
-  resolveVideo(videoId: string, apiKey: string, signal: AbortSignal): Promise<Result<{ liveChatId: string }>>;
+  resolveVideo(videoId: string, apiKey: string, signal: AbortSignal): Promise<Result<ResolvedVideo>>;
   listMessages(liveChatId: string, pageToken: string | undefined, apiKey: string, signal: AbortSignal): Promise<Result<ChatPage>>;
 };
 

@@ -1,10 +1,10 @@
 import { expect, it, vi } from 'vitest';
 import { createHiddenAuthors } from '../src/hidden-authors/store';
 import { CONFIRMATION_VERSION } from '../src/confirmation';
-const video = 'abcdefghijk'; const author = 'UCabcdefghijklmnopqrstuv';
+const video = 'UC0000000000000000000000'; const author = 'UCabcdefghijklmnopqrstuv';
 function fixture() {
   const values: Record<string, unknown> = {
-    [`hiddenAuthors.${video}`]: { ids: [author], displayNames: { [author]: '名前' }, revisions: {} },
+    [`hiddenAuthors.channel.${video}`]: { ids: [author], displayNames: { [author]: '名前' }, revisions: {}, migratedVideos: ['abcdefghijk'] },
     'hiddenAuthors.zyxwvutsrqp': { ids: [], revisions: { [author]: 3 } },
     'apiKey.youtube': 'synthetic', 'apiKey.jev': 'synthetic', 'moderation.threshold': 0.8,
     'youtube.cooldown': { notBefore: 99999 }, 'usage.confirmation': { version: CONFIRMATION_VERSION }, unrelated: true,
@@ -36,12 +36,38 @@ it.each(['add', 'updateDisplayName', 'remove'] as const)('storage読取待ちと
   storage.get.mockImplementationOnce(async () => { const snapshot = structuredClone(values); enter(); await gate; return snapshot; });
   const first = operation === 'add' ? store.add(video, author, 0) : operation === 'remove' ? store.remove(video, author) : store.updateDisplayName(video, author, 0, '古い名前');
   await entered;
-  const queued = store.add('zyxwvutsrqp', author, 0);
+  const queued = store.add('UC1111111111111111111111', author, 0);
   const clear = store.clearAll(); release();
   await Promise.all([first, queued, clear]);
   expect(storage.set).not.toHaveBeenCalled();
   expect(Object.keys(values).some(key => key.startsWith('hiddenAuthors.'))).toBe(false);
 });
+it.each(['read', 'write'] as const)('遅延移行%sと解除/addが全削除に競合しても新旧metadataを復活させない', async phase => {
+  const { values, storage, store } = fixture();
+  values[`hiddenAuthors.channel.${video}`] = { ids: [], revisions: {} };
+  values['hiddenAuthors.abcdefghijk'] = { ids: [author], revisions: {} };
+  let enter!: () => void; let release!: () => void;
+  const entered = new Promise<void>(done => { enter = done; }); const gate = new Promise<void>(done => { release = done; });
+  if (phase === 'read') storage.get.mockImplementationOnce(async () => { const snapshot = structuredClone(values); enter(); await gate; return snapshot; });
+  else storage.set.mockImplementationOnce(async data => { enter(); await gate; Object.assign(values, data); });
+  const migrate = store.migrate('abcdefghijk', video); await entered;
+  const remove = store.remove(video, author); const add = store.add(video, author, 0); const clear = store.clearAll();
+  release(); await Promise.all([migrate, remove, add, clear]);
+  expect(Object.keys(values).some(key => key.startsWith('hiddenAuthors.'))).toBe(false);
+});
+
+it('scope cacheの実行中setとqueued保存は全削除後に対応を復活させない', async () => {
+  const { values, storage, store } = fixture();
+  let enter!: () => void; let release!: () => void;
+  const entered = new Promise<void>(done => { enter = done; }); const gate = new Promise<void>(done => { release = done; });
+  storage.set.mockImplementationOnce(async data => { enter(); await gate; Object.assign(values, data); });
+  const first = store.rememberVideo('abcdefghijk', video); await entered;
+  const queued = store.rememberVideo('zyxwvutsrqp', video); const clear = store.clearAll(); release();
+  await Promise.all([first, queued, clear]);
+  expect(await createHiddenAuthors({ storage, initialize: async () => {} }).channelForVideo('abcdefghijk')).toBeUndefined();
+  expect(Object.keys(values).some(key => key.startsWith('hiddenAuthors.'))).toBe(false);
+});
+
 it('実行中setは完了後に削除し、成功後に古いwriteが残らない', async () => {
   const { values, storage, store } = fixture();
   let enter!: () => void; let release!: () => void;

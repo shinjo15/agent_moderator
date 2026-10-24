@@ -1,13 +1,13 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { CONFIRMATION_VERSION } from '../src/confirmation';
 
-it('説明の版2では旧版1の確認と保存要求を同意へ自動移行しない', async () => {
+it('説明の版3では旧版2の確認と保存要求を同意へ自動移行しない', async () => {
   await start();
-  data['usage.confirmation'] = { version: 1 };
-  expect(await send({ type: 'confirmation.get' })).toEqual({ ok: true, value: { confirmed: false, version: 2 } });
-  expect(await send({ type: 'confirmation.confirm', version: 1 })).toMatchObject({ ok: false });
+  data['usage.confirmation'] = { version: 2 };
+  expect(await send({ type: 'confirmation.get' })).toEqual({ ok: true, value: { confirmed: false, version: 3 } });
+  expect(await send({ type: 'confirmation.confirm', version: 2 })).toMatchObject({ ok: false });
   expect(local.set).not.toHaveBeenCalled();
-  expect(data['usage.confirmation']).toEqual({ version: 1 });
+  expect(data['usage.confirmation']).toEqual({ version: 2 });
 });
 
 type Sender = { id?: string; url?: string; tab?: object };

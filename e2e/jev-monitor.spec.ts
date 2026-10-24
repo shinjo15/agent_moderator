@@ -31,7 +31,7 @@ test('production MV3: 既取得fixture→background→Jev全項目fixture→表�
     await context.route('https://www.googleapis.com/youtube/v3/**', async route => {
       const url = new URL(route.request().url());
       expect(url.searchParams.get('key')).toBe('synthetic-youtube');
-      if (url.pathname.endsWith('/videos')) { await route.fulfill({ json: { items: [{ id: 'abcdefghijk', liveStreamingDetails: { activeLiveChatId: 'fixture-chat' } }] } }); return; }
+      if (url.pathname.endsWith('/videos')) { await route.fulfill({ json: { items: [{ id: 'abcdefghijk', snippet: { channelId: 'UC0000000000000000000000' }, liveStreamingDetails: { activeLiveChatId: 'fixture-chat' } }] } }); return; }
       pages++;
       const msg = (messageId: string, text: string, seconds: number, author = 'fixture-author') => ({ id: messageId,
         snippet: { type: 'textMessageEvent', hasDisplayContent: true, displayMessage: text, publishedAt: new Date(Date.UTC(2026, 0, 1) + seconds * 1000).toISOString() }, authorDetails: { channelId: author } });
