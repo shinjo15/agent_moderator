@@ -19,7 +19,7 @@ test('public copy: 設定とpopupは専門語なし、重要説明を見える�
     await page.goto(`chrome-extension://${id}/options.html`);
     const notice = page.locator('.settings-notice');
     await expect(notice.locator('li')).toHaveCount(4);
-    for (const text of ['他の端末には同期しません', 'アクセスできる人からは保護できません', 'YouTube APIの利用枠', 'Jevの利用料金は利用者負担', 'YouTubeや拡張内のコメント表示は変更しません', 'この版ではコメントの自動非表示は利用できません', '全タブを再読み込み', '接続・認証の確認をせず']) {
+    for (const text of ['他の端末には同期しません', 'アクセスできる人からは保護できません', 'YouTube APIの利用枠', 'Jevの利用料金は利用者負担', 'YouTubeの表示は変更しません', '独立ビューアーだけで非表示', '全タブを再読み込み', '接続・認証の確認をせず']) {
       await expect(notice).toContainText(text);
     }
     await expect(notice).toHaveCSS('font-size', '12px');
@@ -34,7 +34,7 @@ test('public copy: 設定とpopupは専門語なし、重要説明を見える�
     await expect(page.locator('body')).not.toContainText(technical);
     await expect(page.locator('body')).toContainText('YouTubeの画面や標準チャットは変更しません');
     await expect(page.locator('body')).toContainText('拡張の取得画面で解除');
-    await expect(page.locator('body')).toContainText('この版ではコメントの自動非表示は利用できません');
+    await expect(page.locator('body')).toContainText('非表示は独立ビューアーだけ');
   });
 });
 test('public copy: Jevの全エラー表示に次操作がありprovider本文は表示しない', async () => {

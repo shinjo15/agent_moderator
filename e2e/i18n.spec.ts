@@ -80,10 +80,12 @@ for (const locale of ['ja', 'en', 'fr']) {
       await expect(confirm).toHaveCSS('background-color', 'rgb(185, 28, 28)');
       await layout(page);
       await page.goto(`chrome-extension://${id}/monitor.html`);
-      await expect(page.getByRole('heading', { name: locale === 'ja' ? 'YouTubeライブチャット取得' : 'YouTube live chat collection', exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: locale === 'ja' ? '独立チャットビューアー · YouTube Live' : 'Independent chat viewer · YouTube Live', exact: true })).toBeVisible();
       await expect(page.getByRole('button', { name: locale === 'ja' ? 'Jev判定を有効化・再開' : 'Enable / resume Jev evaluation', exact: true })).toBeVisible();
+      await page.getByRole('button', { name: locale === 'ja' ? '非表示一覧' : 'Hidden authors', exact: true }).click();
       await expect(page.getByRole('heading', { name: locale === 'ja' ? 'この配信の非表示投稿者' : 'Hidden authors in this stream', exact: true })).toBeVisible();
       await layout(page);
+      await page.keyboard.press('Escape');
       await page.goto(`chrome-extension://${id}/terms.html`);
       await expect(page).toHaveTitle(locale === 'ja' ? 'Agent Moderator 利用規約（案）' : 'Agent Moderator terms of use (draft)');
       await expect(page.getByRole('heading', { level: 2 })).toHaveCount(9);
@@ -134,7 +136,42 @@ for (const locale of ['ja', 'en', 'fr']) {
       await expect(monitor.getByRole('status')).toContainText(locale === 'ja' ? '同意状態が変更' : 'agreement status changed');
       expect(externalRequests).toBe(0);
       await enable.click(); await start.click();
-      await expect(monitor.locator('.score-badge')).toHaveText(locale === 'ja' ? '判定スコア 0.90' : 'Evaluation score 0.90', { timeout: 15000 });
+      await expect(monitor.locator('#hidden-authors .author-name')).toHaveText('あおい / Aoi', { timeout: 15000 });
+      await expect(monitor.locator('#messages li')).toHaveCount(0);
+      await expect(monitor.locator('#messages .score-badge, #messages .evaluation-summary')).toHaveCount(0);
+      await monitor.getByRole('button', { name: locale === 'ja' ? '非表示一覧' : 'Hidden authors', exact: true }).click();
+      const unhide = monitor.getByRole('button', { name: locale === 'ja' ? 'あおい / Aoi（投稿者ID：UCaaaaaaaaaaaaaaaaaaaaaa）の非表示を解除' : 'Unhide あおい / Aoi (author ID: UCaaaaaaaaaaaaaaaaaaaaaa)', exact: true });
+      await expect(unhide).toBeVisible(); await layout(monitor); await unhide.click();
+      await expect(monitor.locator('#hidden-authors > li')).toHaveCount(0);
+      await monitor.keyboard.press('Escape');
+      await monitor.getByRole('button', { name: locale === 'ja' ? '取得を停止' : 'Stop collection', exact: true }).click();
+      await expect(monitor.locator('.score-badge')).toHaveText('× 0.90', { timeout: 15000 });
+      await expect(monitor.locator('.score-badge')).toBeVisible();
+      await expect(monitor.locator('.score-badge')).toHaveAccessibleName(locale === 'ja' ? /判定済み.*悪質.*判定スコア 0.90/ : /Evaluated.*Malicious.*Evaluation score 0.90/);
+      await expect(monitor.locator('.score-badge')).toHaveAttribute('data-state', 'bad');
+      await expect(monitor.locator('.message-details')).not.toHaveAttribute('open');
+      for (const width of [360, 400, 480, 576, 1000]) {
+        await monitor.setViewportSize({ width, height: 800 }); await layout(monitor);
+        await monitor.locator('.score-badge').hover();
+        const measured = await monitor.evaluate(() => {
+          const row = document.querySelector('.chat-message')!.getBoundingClientRect();
+          const content = document.querySelector('.chat-content')!.getBoundingClientRect();
+          const node = document.querySelector('.score-badge')!; const badge = node.getBoundingClientRect(); const style = getComputedStyle(node);
+          const more = document.querySelector('.message-details > summary')!.getBoundingClientRect();
+          return { inside: content.right < badge.left && badge.right <= more.left && more.right <= row.right,
+            rects: { content: content.toJSON(), badge: badge.toJSON(), more: more.toJSON(), row: row.toJSON() },
+            top: badge.top - content.top, height: badge.height, background: style.backgroundColor,
+            border: style.borderTopWidth, radius: style.borderRadius, color: style.color, borderColor: style.borderTopColor,
+            fonts: ['.chat-author', '.chat-text'].map(selector => {
+              const style = getComputedStyle(document.querySelector(selector)!);
+              return { family: style.fontFamily, size: style.fontSize, weight: style.fontWeight };
+            }) };
+        });
+        expect(measured.inside, JSON.stringify(measured.rects)).toBe(true); expect(measured.height).toBeLessThanOrEqual(24); expect(measured.top).toBe(0);
+        expect(measured.background).toBe('rgba(0, 0, 0, 0)'); expect(measured.border).toBe('1px'); expect(measured.radius).toBe('5px');
+        expect(measured.color).toBe('rgb(185, 28, 28)'); expect(measured.borderColor).toBe(measured.color);
+        expect(measured.fonts).toEqual(Array(2).fill({ family: 'Roboto, Arial, sans-serif', size: '13px', weight: '400' }));
+      }
       expect(payloads).toHaveLength(1);
       expect(Object.keys(payloads[0]).sort()).toEqual(['model', 'questions', 'state']);
       expect(payloads[0].model).toBe('jev-latest');
@@ -144,14 +181,32 @@ for (const locale of ['ja', 'en', 'fr']) {
       expect(createHash('sha256').update(JSON.stringify(payloads[0].questions)).digest('hex')).toBe('b520a1d214bd3131d768410605704fa3ffa4b8d22ebd00d384e7efb96817745b');
       await expect(monitor.locator('.chat-text')).toHaveText('日本語の投稿 Keep original');
       await expect(monitor.locator('.chat-author .author-name')).toHaveText('あおい / Aoi');
+      await monitor.locator('.message-details > summary').click();
       await monitor.getByText(locale === 'ja' ? '項目別スコア' : 'Category scores', { exact: true }).click();
       await expect(monitor.locator('.score-details dt').first()).toHaveText(locale === 'ja' ? '人への攻撃、侮辱、人格否定' : 'Attacks, insults or denigration of a person');
-      const unhide = monitor.getByRole('button', { name: locale === 'ja' ? 'あおい / Aoi（投稿者ID：UCaaaaaaaaaaaaaaaaaaaaaa）の非表示を解除' : 'Unhide あおい / Aoi (author ID: UCaaaaaaaaaaaaaaaaaaaaaa)', exact: true });
-      await expect(unhide).toBeVisible();
-      await layout(monitor);
-      await unhide.click();
-      await expect(monitor.locator('#hidden-authors > li')).toHaveCount(0);
-      await monitor.getByRole('button', { name: locale === 'ja' ? '取得を停止' : 'Stop collection', exact: true }).click();
+      for (const width of [360, 400, 480, 576, 1000]) {
+        await monitor.setViewportSize({ width, height: 800 }); await layout(monitor);
+        const measured = await monitor.evaluate(() => {
+          const chat = document.querySelector('.chat-scroll')!.getBoundingClientRect();
+          const controls = document.querySelector('.monitor-controls')!.getBoundingClientRect();
+          return { chat: chat.height, bottom: controls.bottom, overflowY: getComputedStyle(document.querySelector('.chat-scroll')!).overflowY,
+            sourceRatio: document.querySelector('img')!.getBoundingClientRect().width / document.querySelector('img')!.getBoundingClientRect().height };
+        });
+        expect(measured.chat).toBeGreaterThan(400); expect(measured.bottom).toBeLessThanOrEqual(800);
+        expect(measured.overflowY).toBe('auto'); expect(measured.sourceRatio).toBeCloseTo(2.8, 1);
+      }
+      await monitor.getByRole('button', { name: locale === 'ja' ? '設定を開く' : 'Open settings', exact: true }).click();
+      await expect(monitor.frameLocator('iframe').getByRole('heading', { name: locale === 'ja' ? 'Agent Moderator 設定' : 'Agent Moderator settings', exact: true })).toBeVisible();
+      for (const width of [360, 400, 480, 576]) {
+        await monitor.setViewportSize({ width, height: 800 });
+        const frame = await monitor.frameLocator('iframe').locator('body').evaluate(() => ({
+          width: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth,
+          outside: [...document.querySelectorAll<HTMLElement>('input, select, button')].filter(element => element.getClientRects().length)
+            .filter(element => element.getBoundingClientRect().left < 0 || element.getBoundingClientRect().right > document.documentElement.clientWidth).map(element => element.tagName),
+        }));
+        expect(frame.scroll).toBeLessThanOrEqual(frame.width); expect(frame.outside).toEqual([]);
+      }
+      await monitor.keyboard.press('Escape');
       await page.getByRole('button', { name: locale === 'ja' ? '全配信の非表示データを削除' : 'Delete hidden data for all streams', exact: true }).click();
       await page.getByRole('button', { name: locale === 'ja' ? '削除する' : 'Delete', exact: true }).click();
       await expect(page.getByTestId('hidden-clear-status')).toContainText(locale === 'ja' ? '削除しました' : 'Deleted');

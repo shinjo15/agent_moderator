@@ -1,5 +1,5 @@
 import { runtime } from '../extension-runtime';
-import { failure, validDisplayName, type ChatPage, type Result } from './contracts';
+import { failure, validDisplayName, validProfileImageUrl, type ChatPage, type Result } from './contracts';
 import type { ChatTransport } from './monitor';
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -38,7 +38,12 @@ export function createRuntimeTransport(): ChatTransport {
     resolveVideo: (videoId, signal) => request<{ liveChatId: string }>({ type: 'youtube.resolve', videoId }, signal),
     async listMessages(liveChatId, pageToken, signal) {
       const result = await request<ChatPage>({ type: 'youtube.list', liveChatId, pageToken }, signal);
-      return result.ok && !validPage(result.value) ? failure('invalidResponse') : result;
+      if (!result.ok) return result;
+      if (!validPage(result.value)) return failure('invalidResponse');
+      return { ok: true, value: { ...result.value, messages: result.value.messages.map(message => {
+        const { authorProfileImageUrl, ...rest } = message;
+        return { ...rest, ...(validProfileImageUrl(authorProfileImageUrl) ? { authorProfileImageUrl } : {}) };
+      }) } };
     },
   };
 }

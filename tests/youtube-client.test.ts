@@ -40,6 +40,24 @@ it('HTTP-dateのRetry-Afterを尊重し、不正な値は既定待機へ任せ�
 
 const message = { id: 'msg-1', snippet: { type: 'textMessageEvent', hasDisplayContent: true, displayMessage: 'こんにちは' }, authorDetails: { channelId: 'channel-1' } };
 const chatPage = { nextPageToken: 'next-1', pollingIntervalMillis: 8000, items: [message] };
+it.each(['https://yt3.ggpht.com/channel=s88-c', 'https://yt3.googleusercontent.com/ytc/channel=s48-c'])('公式avatar %s を追加APIなし・キー付加なしで伝播する', async profileImageUrl => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...chatPage,
+    items: [{ ...message, authorDetails: { ...message.authorDetails, profileImageUrl } }] })));
+  const result = await createYouTubeClient(fetcher).listMessages('chat', undefined, 'synthetic-key', new AbortController().signal);
+  expect(result).toMatchObject({ ok: true, value: { messages: [{ authorProfileImageUrl: profileImageUrl }] } });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it.each([undefined, null, 123, '', 'javascript:alert(1)', 'data:image/png;base64,AA', 'http://yt3.ggpht.com/a',
+  'https://user:pass@yt3.ggpht.com/a', 'https://yt3.ggpht.com.evil.invalid/a', 'https://evil-yt3.ggpht.com/a',
+  'https://localhost/a', 'https://yt3.googleusercontent.com.evil.invalid/a', 'https://yt3.ggpht.com:8443/a',
+  'https://yt3.ggpht.com/a?key=synthetic-key', ' https://yt3.ggpht.com/a', 'https://yt3.ggpht.com\\@evil.invalid/a',
+])('avatar欠落/不正 %j は省略し正常本文の取得を止めない', async profileImageUrl => {
+  const client = createYouTubeClient(vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...chatPage,
+    items: [{ ...message, authorDetails: { ...message.authorDetails, profileImageUrl } }] }))));
+  const result = await client.listMessages('chat', undefined, 'synthetic-key', new AbortController().signal);
+  expect(result).toMatchObject({ ok: true, value: { messages: [{ text: 'こんにちは' }] } });
+  if (result.ok) expect(result.value.messages[0]).not.toHaveProperty('authorProfileImageUrl');
+});
 it('既取得authorDetails.displayNameをIDとは別に伝播し追加requestやfields変更をしない', async () => {
   const name = 'みどり <img src=x onerror=alert(1)>';
   const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...chatPage,

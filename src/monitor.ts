@@ -29,8 +29,8 @@ start.textContent = t('startCollection'); start.disabled = true;
 const stop = document.createElement('button');
 stop.type = 'button';
 stop.textContent = t('stopCollection'); stop.disabled = true;
-const settings = document.createElement('a');
-settings.href = 'options.html'; settings.target = '_blank'; settings.textContent = t('openSettings');
+const settings = document.createElement('button');
+settings.type = 'button'; settings.textContent = t('openSettings');
 const messages = document.createElement('ol');
 messages.id = 'messages';
 const controls = document.createElement('section');
@@ -40,7 +40,7 @@ actions.className = 'monitor-actions';
 actions.append(start, stop, settings);
 controls.append(target, actions, status);
 main.append(heading, controls);
-const jev = createJevPanel(controls, createModerationTransport(runtime));
+const jev = createJevPanel(controls, createModerationTransport(runtime), () => hidden.refresh());
 const chatHeading = document.createElement('h2');
 chatHeading.textContent = t('collectedComments');
 chatHeading.id = 'chat-heading';
@@ -61,14 +61,119 @@ empty.textContent = t('noComments');
 chat.append(empty, messages);
 const atBottom = () => chat.scrollHeight - chat.clientHeight - chat.scrollTop <= 2;
 let followLatest = true;
-chat.addEventListener('scroll', () => { followLatest = atBottom(); });
+let anchors: { item: Element; offset: number }[] = [];
+let programmaticTop: number | undefined;
+function rememberPosition() {
+  if (!messages.children.length) return;
+  const top = chat.getBoundingClientRect().top;
+  anchors = [...messages.children].filter(item => item.getBoundingClientRect().bottom > top)
+    .map(item => ({ item, offset: item.getBoundingClientRect().top - top }));
+}
+function restorePosition() {
+  if (followLatest) chat.scrollTop = chat.scrollHeight;
+  else {
+    const anchor = anchors.find(value => value.item.parentNode === messages);
+    if (anchor) chat.scrollTop += anchor.item.getBoundingClientRect().top - chat.getBoundingClientRect().top - anchor.offset;
+  }
+  programmaticTop = chat.scrollTop;
+}
+function synchronizeScrollPosition() {
+  if (!messages.children.length || chat.scrollTop === programmaticTop) return;
+  followLatest = atBottom(); rememberPosition();
+}
+chat.addEventListener('scroll', synchronizeScrollPosition);
 // 評価表示で行の高さが変わっても、過去を読んでいる利用者は末尾へ移動しない。
 new ResizeObserver(() => {
-  if (followLatest) chat.scrollTop = chat.scrollHeight;
+  synchronizeScrollPosition();
+  if (messages.children.length) { restorePosition(); rememberPosition(); }
 }).observe(messages);
 main.append(chatHeading, scoreNote, chat);
-const hidden = createHiddenAuthorPanel(main, runtime);
+// Detached rows remain bounded and can be restored by an explicit unhide, but
+// their bodies are not present in the reader DOM (or its accessibility tree).
+const retained: { author: string; item: HTMLElement; admitted: boolean; avatar: HTMLElement; imageUrl?: string }[] = [];
+const parking = document.createDocumentFragment();
+function renderMessages() {
+  // scrollTop changes before its scroll event is delivered. Read that pending
+  // movement before DOM updates/restoration can overwrite the reader's intent.
+  synchronizeScrollPosition();
+  rememberPosition();
+  const visible = retained.filter(row => row.admitted && hidden.visible(row.author));
+  const visibleItems = new Set(visible.map(row => row.item));
+  for (const item of [...messages.children]) if (!visibleItems.has(item as HTMLElement)) parking.append(item);
+  // Polls and evaluations leave unchanged rows in place, preserving text
+  // selection and keyboard focus. Only new/restored rows need insertion.
+  let next = messages.firstChild;
+  for (const row of visible) {
+    const { item, avatar } = row;
+    if (item === next) next = next.nextSibling;
+    else messages.insertBefore(item, next);
+    // Do not assign src in parking: even detached images can start a request.
+    // Admission and bounded retention have both been checked before this point.
+    if (row.imageUrl) {
+      const image = document.createElement('img');
+      image.width = 24; image.height = 24; image.alt = ''; image.referrerPolicy = 'no-referrer';
+      image.crossOrigin = 'anonymous';
+      image.addEventListener('load', () => { image.hidden = false; }, { once: true });
+      image.addEventListener('error', () => image.remove(), { once: true });
+      image.hidden = true;
+      avatar.append(image);
+      image.src = row.imageUrl;
+      row.imageUrl = undefined;
+    }
+  }
+  empty.hidden = visible.length > 0;
+  empty.textContent = t(hidden.state().status === 'error' ? 'hiddenReadBlocked'
+    : hidden.state().status !== 'ready' ? 'checkingList' : retained.length ? 'allCommentsHidden' : 'noComments');
+  restorePosition();
+  if (visible.length) rememberPosition();
+}
+const hidden = createHiddenAuthorPanel(main, runtime, () => {
+  if (hidden.state().status === 'ready') for (const row of retained) row.admitted = true;
+  renderMessages();
+});
 main.append(notice);
+function panel(title: string, className: string) {
+  const dialog = document.createElement('dialog'); dialog.className = className;
+  const bar = document.createElement('header'); bar.className = 'panel-header';
+  const label = document.createElement('h2'); label.textContent = title; label.id = `${className}-title`;
+  dialog.setAttribute('aria-labelledby', label.id);
+  const close = document.createElement('button'); close.type = 'button'; close.textContent = t('closePanel');
+  close.addEventListener('click', () => dialog.close());
+  bar.append(label, close); dialog.append(bar); main.append(dialog);
+  return dialog;
+}
+const hiddenDialog = panel(t('hiddenTitle'), 'hidden-dialog');
+hiddenDialog.append(main.querySelector('.hidden-author-panel')!);
+const hiddenButton = document.createElement('button'); hiddenButton.type = 'button'; hiddenButton.textContent = t('openHidden');
+hiddenButton.addEventListener('click', () => hiddenDialog.showModal());
+const settingsDialog = panel(t('settingsTitle'), 'settings-dialog');
+settings.addEventListener('click', () => {
+  if (!settingsDialog.querySelector('iframe')) {
+    const frame = document.createElement('iframe'); frame.src = 'options.html'; frame.title = t('settingsTitle'); settingsDialog.append(frame);
+  }
+  settingsDialog.showModal();
+});
+const infoDialog = panel(t('viewerInfo'), 'info-dialog');
+infoDialog.append(scoreNote, notice, controls.querySelector('.jev-controls .monitor-note')!);
+const info = document.createElement('button'); info.type = 'button'; info.textContent = t('viewerInfo');
+info.addEventListener('click', () => infoDialog.showModal());
+const manage = document.createElement('button'); manage.type = 'button'; manage.textContent = t('clearTitle');
+manage.addEventListener('click', () => { hiddenDialog.close(); settings.click(); });
+hiddenDialog.append(manage);
+actions.append(hiddenButton, info);
+const header = document.createElement('header'); header.className = 'viewer-header';
+const brand = document.createElement('strong'); brand.textContent = t('appName');
+const identity = document.createElement('div'); identity.append(brand, heading, target);
+const source = document.createElement('a'); source.href = 'https://www.youtube.com/'; source.target = '_blank'; source.rel = 'noopener noreferrer';
+source.setAttribute('aria-label', t('youtubeSource'));
+const logo = document.createElement('img'); logo.src = 'youtube-developed-with.png'; logo.width = 112; logo.height = 40; logo.alt = 'developed with YouTube';
+source.append(logo); header.append(identity, source);
+const workspace = document.createElement('section'); workspace.className = 'chat-workspace'; workspace.append(chatHeading, chat);
+const jump = document.createElement('button'); jump.type = 'button'; jump.className = 'jump-latest'; jump.textContent = t('jumpLatest'); jump.hidden = true;
+workspace.append(jump);
+jump.addEventListener('click', () => { followLatest = true; chat.scrollTop = chat.scrollHeight; jump.hidden = true; });
+chat.addEventListener('scroll', () => { jump.hidden = followLatest; });
+main.prepend(header, workspace); main.append(controls);
 // Reload never inherits the previous page's opt-in or body context.
 void createModerationTransport(runtime).stop(true);
 let available = false;
@@ -76,8 +181,6 @@ let validTarget = false;
 let initializationGeneration = 0;
 const monitor = createChatMonitor({ transport: createRuntimeTransport(),
   onMessages: batch => {
-    followLatest = atBottom();
-    empty.hidden = true;
     for (const message of batch) {
       const item = document.createElement('li');
       item.className = 'chat-message';
@@ -85,16 +188,21 @@ const monitor = createChatMonitor({ transport: createRuntimeTransport(),
       content.className = 'chat-content';
       const author = createAuthorLabel(message.authorChannelId, message.authorDisplayName);
       author.classList.add('chat-author');
+      const avatar = document.createElement('span');
+      avatar.className = 'chat-avatar'; avatar.setAttribute('aria-hidden', 'true');
       const text = document.createElement('span');
       text.className = 'chat-text';
       text.textContent = message.text;
-      content.append(author, text);
+      content.append(avatar, author, text);
       item.append(content);
-      messages.append(item);
-      while (messages.children.length > MAX_VISIBLE_MESSAGES) jev.remove(messages.firstElementChild as HTMLElement);
+      parking.append(item);
+      retained.push({ author: message.authorChannelId, item, admitted: false, avatar, imageUrl: message.authorProfileImageUrl });
+      while (retained.length > MAX_VISIBLE_MESSAGES) jev.remove(retained.shift()!.item);
       jev.add(message.id, message.authorChannelId, item);
     }
-    if (followLatest) chat.scrollTop = chat.scrollHeight;
+    // A new batch may already have registered a burst in background storage.
+    // Never admit its rows using the previous snapshot.
+    hidden.refresh();
   },
   onState: state => {
     start.disabled = state.status === 'running' || !available || !validTarget;
@@ -117,7 +225,7 @@ runtime.onMessage.addListener((message, sender) => {
   if (message.type === 'hidden.clearing' || message.type === 'hidden.refresh') {
     jev.stop(t('clearJevStop'), true);
     monitor.credentialsChanged(available);
-    hidden.refresh();
+    hidden.refresh(message.type === 'hidden.clearing');
     status.textContent = t('clearCollectionStop');
   }
   if (message.type === 'confirmation.changed') {
@@ -132,6 +240,10 @@ runtime.onMessage.addListener((message, sender) => {
     status.textContent = t(available ? 'youtubeKeyChanged' : 'youtubeKeyMissingStop');
   }
   if (message.type === 'youtube.targetChanged') {
+    for (const row of retained) jev.remove(row.item);
+    retained.length = 0;
+    anchors = [];
+    followLatest = true;
     hidden.setVideo(undefined);
     jev.stop(); jev.setTarget(false);
     initializationGeneration++;

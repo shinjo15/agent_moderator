@@ -22,6 +22,7 @@ for (const scenario of ['oldDisabled', 'stop', 'keyChange'] as const) {
         chrome.runtime.sendMessage = async message => {
           const value = message as { type: string };
           if (value.type === 'youtube.status') return { ok: true, value: { videoId: 'abcdefghijk', credentialsAvailable: true } };
+          if (value.type === 'hidden.list') return { ok: true, videoId: 'abcdefghijk', ids: [] };
           if (value.type === 'youtube.resolve') return { ok: true, value: { liveChatId: 'fixture' } };
           if (value.type === 'youtube.list') return { ok: true, value: { messages: [{ id: 'one', authorChannelId: 'author', text: '批判fixture', type: 'textMessageEvent' }], nextPageToken: 'next', pollingIntervalMillis: 5000, ended: false } };
           if (value.type === 'jev.evaluate') return pending;
@@ -38,6 +39,10 @@ for (const scenario of ['oldDisabled', 'stop', 'keyChange'] as const) {
       if (scenario !== 'oldDisabled') await page.getByRole('button', { name: 'Jev判定を有効化・再開' }).click();
       await page.getByRole('button', { name: '取得を開始', exact: true }).click();
       await expect(page.locator('#messages li')).toHaveCount(1, { timeout: 12000 });
+      await expect(page.locator('.evaluation-summary')).toHaveAccessibleName(scenario === 'oldDisabled' ? /未判定/ : /判定中/);
+      await expect(page.locator('.evaluation-summary')).toBeVisible();
+      await expect(page.locator('.score-badge')).toHaveText(scenario === 'oldDisabled' ? '—' : '…');
+      await expect(page.locator('.score-badge')).toHaveAttribute('data-state', 'neutral');
       if (scenario === 'oldDisabled') await page.getByRole('button', { name: 'Jev判定を有効化・再開' }).click();
       else if (scenario === 'stop') await page.getByRole('button', { name: 'Jev判定を停止', exact: true }).click();
       else await page.evaluate(() => jevRace.notify());
@@ -45,6 +50,10 @@ for (const scenario of ['oldDisabled', 'stop', 'keyChange'] as const) {
       await page.evaluate(scenario => jevRace.release({ ok: true, value: { id: 'one', authorChannelId: 'author', burst: scenario === 'oldDisabled' ? 'notObserved' : 'confirmed',
         jev: 'disabled', reasons: scenario === 'oldDisabled' ? [] : ['burst'], ...(scenario === 'oldDisabled' ? {} : { malicious: true }) } }), scenario);
       await expect(page.locator('#messages li')).not.toContainText('悪質');
+      await expect(page.locator('.evaluation-summary')).toHaveAccessibleName(scenario === 'oldDisabled' ? /未判定/ : /未判定（停止）/);
+      await expect(page.locator('.score-badge')).toHaveText('—');
+      await expect(page.locator('.score-badge')).toHaveAttribute('data-state', 'neutral');
+      if (scenario !== 'oldDisabled') await expect(page.locator('.moderation-status')).toHaveText('未判定：停止しました。');
       await expect(page.getByTestId('jev-status')).toHaveText(before!);
       await page.getByRole('button', { name: '取得を停止', exact: true }).click();
     } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }

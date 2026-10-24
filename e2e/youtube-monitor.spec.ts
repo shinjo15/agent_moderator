@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { confirmUsage } from './fixtures/confirm-usage';
 
+type ChromeWindow = { id?: number; type?: string; left?: number; top?: number; width?: number; height?: number; state?: string };
 declare const chrome: {
+  windows: { getCurrent(): Promise<ChromeWindow>; get(id: number): Promise<ChromeWindow>; getAll(): Promise<ChromeWindow[]> };
   tabs: { create(options: { url: string; active: boolean }): Promise<unknown> };
   runtime: { sendMessage(message: unknown): Promise<unknown> };
 };
@@ -24,7 +26,7 @@ test('production MV3: activeTabから選択しYouTubeタブ前面でもfixture�
     let videoCalls = 0;
     const callTimes: number[] = [];
     let mode: 'success' | 'quota' | 'invalid' = 'success';
-    await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>YouTube視聴タブfixture</title><h1>配信fixture（実配信ではない）</h1>' }));
+    await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><meta charset="utf-8"><title>YouTube視聴タブfixture</title><h1>配信fixture（実配信ではない）</h1>' }));
     await context.route('https://www.googleapis.com/youtube/v3/**', async route => {
       const url = new URL(route.request().url());
       expect(['fixture-not-real-key', 'fixture-replacement']).toContain(url.searchParams.get('key'));
@@ -70,10 +72,20 @@ test('production MV3: activeTabから選択しYouTubeタブ前面でもfixture�
     await worker.evaluate(extensionId => chrome.tabs.create({ url: `chrome-extension://${extensionId}/popup.html`, active: false }), id);
     const popup = await popupPromise;
     await expect(popup.getByRole('button', { name: 'この動画のチャットを取得' })).toBeEnabled();
+    const watchBefore = await popup.evaluate(() => chrome.windows.getCurrent());
+    const windowsBefore = await worker.evaluate(async () => (await chrome.windows.getAll()).map(window => window.id).sort());
     const monitorPromise = context.waitForEvent('page');
     await popup.getByRole('button', { name: 'この動画のチャットを取得' }).click();
     const monitor = await monitorPromise;
     await expect(monitor).toHaveURL(`chrome-extension://${id}/monitor.html`);
+    const viewerWindow = await monitor.evaluate(() => chrome.windows.getCurrent());
+    expect(viewerWindow.id).not.toBe(watchBefore.id);
+    expect(viewerWindow.type).toBe('normal');
+    expect(viewerWindow.id).toBeDefined();
+    expect(await worker.evaluate(async () => (await chrome.windows.getAll()).map(window => window.id).sort())).toEqual([...windowsBefore, viewerWindow.id].sort());
+    const watchAfter = await worker.evaluate(windowId => chrome.windows.get(windowId!), watchBefore.id);
+    for (const key of ['left', 'top', 'width', 'height', 'state'] as const) expect(watchAfter[key]).toEqual(watchBefore[key]);
+    expect(await youtube.title()).toBe('YouTube視聴タブfixture');
     await expect(monitor.getByRole('button', { name: '取得を開始' })).toBeEnabled();
     expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'jev.enable' })))
       .toMatchObject({ ok: false, error: { code: 'confirmationRequired' } });

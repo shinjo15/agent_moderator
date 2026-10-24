@@ -101,8 +101,10 @@ test('YouTube各画面へ注入せずDOM/CSS/標準操作を維持し、実判�
         await popup.getByRole('button', { name: 'この動画のチャットを取得' }).click();
         const monitor = await mp;
         const unhide = monitor.getByRole('button', { name: `みどり（投稿者ID：${author}）の非表示を解除`, exact: true });
+        await monitor.getByRole('button', { name: '非表示一覧', exact: true }).click();
         await unhide.click();
         await expect(monitor.locator('#hidden-authors li')).toHaveCount(0);
+        await monitor.keyboard.press('Escape');
         await monitor.getByRole('button', { name: 'Jev判定を有効化・再開' }).click();
         await expect(monitor.getByTestId('jev-status')).toContainText('有効');
         await monitor.getByRole('button', { name: '取得を開始', exact: true }).click();
@@ -110,10 +112,11 @@ test('YouTube各画面へ注入せずDOM/CSS/標準操作を維持し、実判�
         await expectNativeUnchanged();
         releaseJev!();
         await expect(monitor.locator('#hidden-authors li')).toContainText(author);
-        await expect(monitor.locator('#messages li')).toBeVisible();
-        await expect(monitor.locator('#messages')).toContainText('APIから取得したコメント');
+        await expect(monitor.locator('#messages li')).toHaveCount(0);
+        await expect(monitor.locator('#messages')).not.toContainText('APIから取得したコメント');
         await expectNativeUnchanged();
         await monitor.getByRole('button', { name: '取得を停止', exact: true }).click();
+        await monitor.getByRole('button', { name: '非表示一覧', exact: true }).click();
         await unhide.click();
         await expect(monitor.locator('#hidden-authors li')).toHaveCount(0);
         await expect(monitor.locator('#messages li')).toHaveCount(1);

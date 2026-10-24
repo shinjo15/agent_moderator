@@ -30,7 +30,7 @@ it('導入・削除手順は現行のUIと解除後の残存を案内する', ()
     expect(text).toContain('世代情報');
     expect(text).toContain('非表示を解除');
   }
-  expect(onboarding).toContain('この配信の非表示投稿者');
+  expect(onboarding).toContain('非表示一覧');
   expect(privacy).toContain('hiddenAuthors.');
 });
 

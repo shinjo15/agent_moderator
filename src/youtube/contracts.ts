@@ -20,7 +20,15 @@ export type ErrorCode = keyof typeof errorMessages;
 export type ChatError = { code: ErrorCode; message: string; retryAfterMillis?: number };
 export type Result<T> = { ok: true; value: T } | { ok: false; error: ChatError };
 export const validDisplayName = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
-export type ChatMessage = { id: string; text: string; authorChannelId: string; authorDisplayName?: string; type: string; publishedAt?: string };
+export function validProfileImageUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || !value.startsWith('https://') || /[\s\\]/.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && ['yt3.ggpht.com', 'yt3.googleusercontent.com'].includes(url.hostname)
+      && !url.username && !url.password && !url.port && !url.search && !url.hash;
+  } catch { return false; }
+}
+export type ChatMessage = { id: string; text: string; authorChannelId: string; authorDisplayName?: string; authorProfileImageUrl?: string; type: string; publishedAt?: string };
 export type ChatPage = {
   messages: ChatMessage[];
   nextPageToken: string;
