@@ -16,7 +16,7 @@ const confirmation = createConfirmation({ storage: platform.storage.local, initi
 const filter = createFilterSettingsHandler({ settings: filterSettings, runtime });
 const moderation = createModeration({ client: createJevClient(), readKey: readJevApiKeyForBackground, session: platform.storage.session, readThreshold: filterSettings.read, readConfirmation: confirmation.read });
 const hiddenAuthors = createHiddenAuthors({ storage: platform.storage.local, initialize: initializeCredentialStorage });
-const youtube = createYouTubeHandler({ session: platform.storage.session, tabs: platform.tabs, runtime, moderation, readConfirmation: confirmation.read,
+const youtube = createYouTubeHandler({ session: platform.storage.session, tabs: platform.tabs, windows: platform.windows, runtime, moderation, readConfirmation: confirmation.read,
   hiddenAuthors, client: createYouTubeClient(), initialize: initializeCredentialStorage, readApiKey: readYouTubeApiKeyForBackground });
 const hidden = createHiddenAuthorHandler({ store: hiddenAuthors, tabs: platform.tabs, session: platform.storage.session, runtime, clearAll: youtube.clearHiddenData });
 platform.storage.onChanged?.addListener((changes, area) => {

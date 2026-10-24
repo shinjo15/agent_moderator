@@ -18,19 +18,67 @@ function setup() {
     set: vi.fn(async (data: Record<string, unknown>) => { Object.assign(values, data); }),
     remove: vi.fn(async (keys: string[]) => { for (const key of keys) delete values[key]; }),
   };
-  const tabs = { get: vi.fn(async (id: number) => ({ id, url: id === 9 ? 'https://www.youtube.com/watch?v=abcdefghijk' : 'chrome-extension://test/monitor.html' })),
-    create: vi.fn(async () => ({ id: 10 })), update: vi.fn(async () => ({})) };
+  const tabs = { get: vi.fn(async (id: number): Promise<{ id?: number; url?: string; windowId?: number }> => ({ id, windowId: id === 9 ? 1 : 2, url: id === 9 ? 'https://www.youtube.com/watch?v=abcdefghijk' : 'chrome-extension://test/monitor.html' })),
+    create: vi.fn(async () => ({ id: 10 })), update: vi.fn(async (_id: number, _options: { url?: string; active?: boolean }) => ({})) };
+  const windows = {
+    create: vi.fn(async (): Promise<{ id?: number; tabs?: { id?: number }[] }> => ({ id: 2, tabs: [{ id: 10 }] })),
+    get: vi.fn(async (_id: number) => ({ type: 'normal' })),
+    update: vi.fn(async (_id: number, _options: { focused: boolean }) => ({})),
+  };
   const client = { resolveVideo: vi.fn().mockResolvedValue({ ok: true, value: { liveChatId: 'chat-1' } }),
     listMessages: vi.fn().mockResolvedValue({ ok: true, value: { messages: [], nextPageToken: 'next', pollingIntervalMillis: 8000, ended: false } }) };
   const readApiKey = vi.fn(async () => 'fixture-key' as string | undefined);
   let now = 0;
-  const deps = { session, tabs, client, readApiKey, readConfirmation: vi.fn(async () => true), initialize: vi.fn(async () => {}),
+  const deps = { session, tabs, windows, client, readApiKey, readConfirmation: vi.fn(async () => true), initialize: vi.fn(async () => {}),
     runtime: { id: 'test', getURL: (path: string) => `chrome-extension://test/${path}`, sendMessage: vi.fn(async () => {}) }, now: () => now };
   return { handler: createYouTubeHandler(deps), deps, values, advance: (n: number) => { now += n; } };
 }
 const popup = { id: 'test', url: 'chrome-extension://test/popup.html' };
 const monitor = { id: 'test', url: 'chrome-extension://test/monitor.html', tab: { id: 10 } };
 const open = { type: 'youtube.openMonitor', tabId: 9, videoId: 'abcdefghijk' };
+it('通常Chrome別窓を新規作成し、binding保存後にmonitorへ遷移し再利用する（視聴窓には触れない）', async () => {
+  const { deps, values } = setup();
+  const handler = createYouTubeHandler(deps);
+  deps.tabs.update.mockImplementation(async (id, options) => {
+    expect(values['youtube.monitorBinding']).toMatchObject({ monitorTabId: id, targetTabId: 9, videoId: open.videoId });
+    expect(options.url).toBe(deps.runtime.getURL('monitor.html')); return {};
+  });
+  expect(await handler.handle(open, popup)).toMatchObject({ ok: true });
+  expect(deps.windows.create).toHaveBeenCalledWith({ url: 'about:blank', type: 'normal', width: 480, height: 800 });
+  expect(deps.tabs.create).not.toHaveBeenCalled();
+
+  expect(deps.tabs.update).toHaveBeenCalledWith(10, { url: deps.runtime.getURL('monitor.html'), active: true });
+  await handler.handle(open, popup);
+  expect(deps.windows.create).toHaveBeenCalledTimes(1);
+  expect(deps.windows.update).toHaveBeenCalledExactlyOnceWith(2, { focused: true });
+});
+it.each([{}, { tabs: [{ id: 10 }] }, { id: NaN, tabs: [{ id: 10 }] }, { id: -1, tabs: [{ id: 10 }] }, { id: 2 }, { id: 2, tabs: [] }, { id: 2, tabs: [{}] }, { id: 2, tabs: [{ id: NaN }] }, { id: 2, tabs: [{ id: -1 }] }])('window作成結果に有効なwindow/tab IDがない場合は成功やbinding保存をしない: %j', async created => {
+  const { deps, values } = setup();
+  deps.windows.create.mockResolvedValueOnce(created);
+  expect(await createYouTubeHandler(deps).handle(open, popup)).toEqual(failure('network'));
+  expect(values['youtube.monitorBinding']).toBeUndefined(); expect(deps.tabs.update).not.toHaveBeenCalled();
+});
+it('window作成失敗では成功やbinding保存をしない', async () => {
+  const { handler, deps, values } = setup();
+  deps.windows.create.mockRejectedValueOnce(new Error('synthetic-window-creation-failure'));
+  expect(await handler.handle(open, popup)).toEqual(failure('network'));
+  expect(values['youtube.monitorBinding']).toBeUndefined(); expect(deps.tabs.update).not.toHaveBeenCalled();
+});
+it.each(['same-window', 'popup', 'closed', 'missing-window'] as const)('旧bindingが%sなら再利用せずnormal別窓を作成する', async kind => {
+  const { handler, deps, values } = setup();
+  values['youtube.monitorBinding'] = { monitorTabId: 11, targetTabId: 9, videoId: open.videoId };
+  const get = deps.tabs.get.getMockImplementation()!;
+  deps.tabs.get.mockImplementation(async id => {
+    if (id !== 11) return get(id);
+    if (kind === 'closed') throw new Error('closed');
+    return { id, url: deps.runtime.getURL('monitor.html'), windowId: kind === 'missing-window' ? undefined : kind === 'same-window' ? 1 : 3 };
+  });
+  if (kind === 'popup') deps.windows.get.mockResolvedValueOnce({ type: 'popup' });
+  expect(await handler.handle(open, popup)).toMatchObject({ ok: true, value: { monitorTabId: 10 } });
+  expect(deps.windows.create).toHaveBeenCalledWith({ url: 'about:blank', type: 'normal', width: 480, height: 800 });
+  expect(deps.tabs.update).toHaveBeenCalledExactlyOnceWith(10, { url: deps.runtime.getURL('monitor.html'), active: true });
+  expect(deps.windows.update).not.toHaveBeenCalled();
+});
 it.each([
   ['preparation', true], ['preparation', false], ['send', true], ['send', false],
 ] as const)('全削除はconfirmation %s await中の旧要求を失効（遅延確認=%s）し新Jev許可を止めない', async (checkpoint, confirmed) => {
@@ -623,7 +671,7 @@ it.each([
   });
   const oldRequest = handler.handle({ type, requestId: 'old-A-request' }, monitor);
   await readingA.promise;
-  deps.tabs.get.mockImplementation(async id => ({ id, url: id === 11
+  deps.tabs.get.mockImplementation(async id => ({ id, windowId: id === 10 ? 2 : 1, url: id === 11
     ? 'https://www.youtube.com/watch?v=zyxwvutsrqp'
     : id === 9 ? 'https://www.youtube.com/watch?v=abcdefghijk' : monitor.url }));
   await handler.handle({ ...open, tabId: 11, videoId: 'zyxwvutsrqp' }, popup);
@@ -688,7 +736,7 @@ it('新binding書込の完了時にもJev世代を切り替え旧monitorから�
 it.each([11, 9])('新binding書込中の旧対象イベントは新対象tab %iを削除しない', async newTarget => {
   const { handler, deps, values } = setup();
   await handler.handle(open, popup);
-  deps.tabs.get.mockImplementation(async id => ({ id, url: id === newTarget
+  deps.tabs.get.mockImplementation(async id => ({ id, windowId: id === 10 ? 2 : 1, url: id === newTarget
     ? 'https://www.youtube.com/watch?v=zyxwvutsrqp'
     : id === 9 ? 'https://www.youtube.com/watch?v=abcdefghijk' : monitor.url }));
   const writing = deferred();

@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { zipSync } from 'fflate';
 
 // 明示allowlist: ソース、.env、ログ、秘密情報を梱包対象にしない。
-const files = ['manifest.json', 'jev-questions.json', 'options.html', 'popup.html', 'monitor.html', 'terms.html', 'terms.js', 'options.js', 'popup.js', 'monitor.js', 'background.js', '_locales/en/messages.json', '_locales/ja/messages.json'];
+const files = ['manifest.json', 'icons/icon-16.png', 'icons/icon-32.png', 'icons/icon-48.png', 'icons/icon-128.png', 'jev-questions.json', 'options.html', 'popup.html', 'monitor.html', 'terms.html', 'terms.js', 'options.js', 'popup.js', 'monitor.js', 'background.js', 'youtube-developed-with.png', '_locales/en/messages.json', '_locales/ja/messages.json'];
 const archive = {};
 for (const file of files) archive[file] = new Uint8Array(await readFile(`dist/${file}`));
 await mkdir('artifacts', { recursive: true });

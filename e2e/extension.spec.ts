@@ -77,8 +77,8 @@ test('実際のMV3拡張を読み込み、設定buttonから同じpageで設定�
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(`chrome-extension://${extensionId}/${manifest.options_ui.page}`);
     await expect(page.getByRole('heading', { name: 'Agent Moderator 設定' })).toBeVisible();
-    await expect(page.locator('.settings-notice')).toContainText('この版ではコメントの自動非表示は利用できません');
-    await expect(page.locator('.settings-notice')).toContainText('YouTubeや拡張内のコメント表示は変更しません');
+    await expect(page.locator('.settings-notice')).toContainText('独立ビューアーだけで非表示');
+    await expect(page.locator('.settings-notice')).toContainText('YouTubeの表示は変更しません');
     await expect(page.getByLabel('Jev APIキー')).toHaveAttribute('type', 'password');
     await expect(page.getByLabel('YouTube APIキー')).toHaveAttribute('type', 'password');
     const notice = page.locator('.settings-notice');
@@ -200,8 +200,8 @@ test('実際のMV3拡張を読み込み、設定buttonから同じpageで設定�
     await expect(page.getByTestId('jev-status')).toHaveText('未設定：設定が必要です。');
     await page.goto(`chrome-extension://${extensionId}/${manifest.action.default_popup}`);
     await expect(page.getByRole('heading', { name: 'Agent Moderator', exact: true })).toBeVisible();
-    await expect(page.locator('body')).toContainText('この版ではコメントの自動非表示は利用できません');
-    await expect(page.locator('body')).toContainText('対象の保存・管理のみ対応しています');
+    await expect(page.locator('body')).toContainText('非表示は独立ビューアーだけ');
+    await expect(page.locator('body')).toContainText('保存済みリストは停止後も残り');
     const settings = page.getByRole('button', { name: '設定を開く', exact: true });
     await expect(settings).toHaveAttribute('type', 'button');
     const pagesBeforeClick = context.pages();

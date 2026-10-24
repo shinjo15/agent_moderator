@@ -75,21 +75,62 @@ for (const lifecycle of ['removed', 'expired'] as const) {
       await expect(page.getByTestId('jev-status')).toContainText('有効');
       await page.evaluate(() => failureFixture.add('active'));
       expect(await page.evaluate(() => failureFixture.requests())).toBe(1);
+      await expect(page.locator('.evaluation-summary')).toHaveAccessibleName(/判定中/);
+      await expect(page.locator('.score-badge')).toHaveText('…');
+      await expect(page.locator('.score-badge')).toHaveAttribute('data-state', 'neutral');
+      await expect(page.locator('.evaluation-summary')).toBeVisible();
+      await expect(page.locator('.message-details')).not.toHaveAttribute('open');
       if (lifecycle === 'removed') await page.evaluate(() => failureFixture.remove());
-      else await page.clock.runFor(60001);
+      else {
+        await page.clock.runFor(60001);
+        await expect(page.locator('.evaluation-summary')).toHaveAccessibleName(/未判定（期限切れ）/);
+        await expect(page.locator('.moderation-status')).toContainText('判定の待ち時間を超えました');
+      }
       await page.evaluate(() => failureFixture.release());
       await expect(page.getByTestId('jev-status')).toContainText('利用制限');
       await expect(page.getByTestId('jev-status')).toContainText('自動では再開しません');
       await expect(enable).toBeEnabled(); await expect(disable).toBeDisabled();
       expect(await page.evaluate(() => failureFixture.requests())).toBe(1);
       if (lifecycle === 'removed') await expect(page.locator('main > li')).toHaveCount(0);
-      else await expect(page.locator('.moderation-status')).toContainText('判定の待ち時間を超えました');
+      else {
+        await expect(page.locator('.moderation-status')).toContainText('判定の待ち時間を超えました');
+        await expect(page.locator('.evaluation-summary')).toHaveAccessibleName(/未判定（期限切れ）/);
+      }
       await enable.click();
       await expect(page.getByTestId('jev-status')).toContainText('有効');
       await expect(enable).toBeDisabled(); await expect(disable).toBeEnabled();
     });
   });
 }
+
+test('Jev待機/queue full/TTL/停止は閉じた詳細と可視summaryで整合し再評価しない', async () => {
+  await withPanel(async page => {
+    await page.getByRole('button', { name: 'Jev判定を有効化・再開' }).click();
+    await page.evaluate(() => {
+      for (let index = 0; index < 202; index++) failureFixture.add(`queued-${index}`);
+    });
+    const rows = page.locator('main > li');
+    await expect(rows.first().locator('.evaluation-summary')).toHaveAccessibleName(/判定中/);
+    await expect(rows.nth(1).locator('.evaluation-summary')).toHaveAccessibleName(/未判定/);
+    await expect(rows.nth(1).locator('.score-badge')).toHaveText('—');
+    await expect(rows.nth(1).locator('.moderation-status')).toHaveText('未判定');
+    await expect(rows.last().locator('.evaluation-summary')).toHaveAccessibleName(/未判定（上限）/);
+    await expect(rows.last().locator('.moderation-status')).toContainText('判定待ちの上限');
+    await expect(rows.last().locator('.evaluation-summary')).toBeVisible();
+    await expect(page.locator('.message-details[open], .score-badge:not([data-state="neutral"])')).toHaveCount(0);
+    expect(await page.evaluate(() => failureFixture.requests())).toBe(1);
+    await page.clock.runFor(60001);
+    await expect(rows.first().locator('.evaluation-summary')).toHaveAccessibleName(/未判定（期限切れ）/);
+    await expect(rows.nth(1).locator('.evaluation-summary')).toHaveAccessibleName(/未判定（上限）/);
+    await expect(rows.nth(1).locator('.moderation-status')).toContainText('待ち時間や表示件数の上限');
+    await page.getByRole('button', { name: 'Jev判定を停止', exact: true }).click();
+    await expect(rows.first().locator('.evaluation-summary')).toHaveAccessibleName(/未判定（停止）/);
+    await page.evaluate(() => failureFixture.release()); await page.clock.runFor(100);
+    await expect(rows.first().locator('.evaluation-summary')).toHaveAccessibleName(/未判定（停止）/);
+    await expect(page.locator('.score-badge:not([data-state="neutral"])')).toHaveCount(0);
+    expect(await page.evaluate(() => failureFixture.requests())).toBe(1);
+  });
+});
 
 test('Jev旧世代失敗は削除後に再開した新世代UIを停止しない', async () => {
   await withPanel(async page => {
@@ -125,7 +166,10 @@ test('current観測TTL expiryの429を実client/core/runtime/panel経路で停�
     await expect(page.getByTestId('jev-status')).toContainText('自動では再開しません');
     await expect(enable).toBeEnabled(); await expect(disable).toBeDisabled();
     await expect(page.locator('.moderation-status')).toContainText('未判定 / Jev判定失敗');
-    await expect(page.locator('.score-badge')).toHaveCount(0);
+    await expect(page.locator('.evaluation-summary')).toHaveAccessibleName(/判定失敗/);
+    await expect(page.locator('.evaluation-summary')).toBeVisible();
+    await expect(page.locator('.score-badge')).toHaveText('!');
+    await expect(page.locator('.score-badge')).toHaveAttribute('data-state', 'neutral');
     await expect(page.locator('body')).not.toContainText('期限切れ名前fixture');
     expect(await page.evaluate(() => failureFixture.evaluate('expired-current'))).toBeUndefined();
     expect(await page.evaluate(() => failureFixture.requests())).toBe(1);
@@ -160,7 +204,9 @@ test('旧世代遅延429のcooldownは実client/coreの次通信を抑止しUI�
     await expect(page.getByTestId('jev-status')).toContainText('利用制限');
     await expect(page.getByTestId('jev-status')).toContainText('自動では再開しません');
     await expect(page.locator('main > li').last()).toContainText('未判定 / Jev判定失敗');
-    await expect(page.locator('.score-badge')).toHaveCount(0);
+    await expect(page.locator('main > li').first().locator('.evaluation-summary')).toHaveAccessibleName(/未判定（停止）/);
+    await expect(page.locator('main > li').last().locator('.evaluation-summary')).toHaveAccessibleName(/判定失敗/);
+    await expect(page.locator('.score-badge:not([data-state="neutral"])')).toHaveCount(0);
     await expect(enable).toBeEnabled(); await expect(disable).toBeDisabled();
     expect(await page.evaluate(() => failureFixture.requests())).toBe(1);
     await enable.click();
@@ -172,6 +218,7 @@ test('旧世代遅延429のcooldownは実client/coreの次通信を抑止しUI�
     await expect(page.getByTestId('jev-status')).toContainText('有効');
     await page.evaluate(() => failureFixture.add('resumed'));
     await expect(page.locator('main > li').last()).toContainText('Jev判定済み');
+    await expect(page.locator('main > li').last().locator('.evaluation-summary')).toHaveAccessibleName(/判定済み/);
     expect(await page.evaluate(() => failureFixture.requests())).toBe(2);
   }, true);
 });

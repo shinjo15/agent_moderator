@@ -78,12 +78,15 @@ test('MV3 threshold: 実policy/runtime/非表示・0/1・遅延snapshot/cached�
         expect(calls).toBe(before + 1); release();
       }
       const row = monitor.locator('#messages li').filter({ hasText: `API fixture ${index}` });
-      await expect(row).toContainText(`判定の基準値 ${scenario.threshold}`, { timeout: 15000 });
-      await expect(row).toContainText(scenario.malicious ? '悪質' : '該当なし');
+      await expect.poll(() => monitor.evaluate(id => chrome.runtime.sendMessage({ type: 'jev.evaluate', id }), `post-${index}`), { timeout: 15000 })
+        .toMatchObject({ ok: true, value: { threshold: scenario.threshold, malicious: scenario.malicious } });
       if (scenario.malicious) {
         await expect(monitor.locator('#hidden-authors')).toContainText(authors[index]);
+        await expect(row).toHaveCount(0);
         await expect(frame.locator(`#author-${index}`)).toBeVisible();
       } else {
+        await expect(row).toContainText(`判定の基準値 ${scenario.threshold}`);
+        await expect(row).toContainText('該当なし');
         await expect(monitor.locator('#hidden-authors')).not.toContainText(authors[index]);
         await expect(frame.locator(`#author-${index}`)).toBeVisible();
       }

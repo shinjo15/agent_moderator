@@ -44,13 +44,34 @@ test('MV3: 公式取得fixture→Jev判定→保存一覧・解除・連投の�
  await expect(monitor.locator('#hidden-authors li')).toHaveCount(0);
  releaseJev!();
  await expect(monitor.locator('#hidden-authors li')).toContainText(author,{timeout:15000});
+ await expect(monitor.locator('#messages li')).toHaveCount(0);
+ await expect(monitor.locator('#messages')).not.toContainText('APIからだけの本文');
+ await expect(monitor.locator('.chat-scroll .empty-list')).toContainText('非表示');
 
  expect(await worker.evaluate(async video => (await chrome.storage.local.get([`hiddenAuthors.${video}`]))[`hiddenAuthors.${video}`], video))
    .toMatchObject({ ids: [author], displayNames: { [author]: 'みどり' } });
  await monitor.getByRole('button',{name:'取得を停止',exact:true}).click();
+ await monitor.reload();
+ await expect(monitor.getByTestId('jev-status')).toContainText('未有効化');
+ await monitor.waitForTimeout(5100); // Reload does not shorten the background API cooldown.
+ const beforeReload = pages;
+ await monitor.evaluate(() => {
+   Object.assign(globalThis, { savedAuthorFlashed: false });
+   const check = () => { if (document.querySelector('#messages li')) Object.assign(globalThis, { savedAuthorFlashed: true }); requestAnimationFrame(check); };
+   requestAnimationFrame(check);
+ });
+ await monitor.getByRole('button',{name:'取得を開始',exact:true}).click();
+ await expect.poll(() => pages, { timeout: 15000 }).toBeGreaterThan(beforeReload);
+ await monitor.waitForTimeout(100);
+ await expect(monitor.locator('#messages li')).toHaveCount(0);
+ expect(await monitor.evaluate(() => (globalThis as typeof globalThis & { savedAuthorFlashed: boolean }).savedAuthorFlashed)).toBe(false);
+ await monitor.getByRole('button',{name:'取得を停止',exact:true}).click();
+ await monitor.getByRole('button',{name:'非表示一覧',exact:true}).click();
  await monitor.getByRole('button',{name:`みどり（投稿者ID：${author}）の非表示を解除`,exact:true}).click();
  await expect(monitor.locator('#hidden-authors li')).toHaveCount(0);
+ await expect(monitor.locator('#messages')).toContainText('APIからだけの本文');
  await expect(monitor.getByTestId('jev-status')).toContainText('停止');
+ await monitor.keyboard.press('Escape');
  burst=true;
  await monitor.getByRole('button',{name:'取得を開始',exact:true}).click();
  await expect(monitor.locator('#hidden-authors li')).toContainText(author,{timeout:15000});
@@ -67,6 +88,8 @@ test('MV3: 公式取得fixture→Jev判定→保存一覧・解除・連投の�
  await expect(monitor.getByRole('status')).toContainText('非表示データの削除');
  await expect(monitor.locator('#hidden-authors li')).toHaveCount(0);
  await expect(monitor.getByTestId('jev-status')).toContainText('停止');
+ await expect(monitor.locator('#messages')).toContainText('APIからだけの本文');
+ await expect(monitor.locator('#messages')).toContainText('公式取得fixtureの連投');
  }finally{await context.close();await rm(profile,{recursive:true,force:true});}
 });
 

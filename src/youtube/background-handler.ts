@@ -13,9 +13,14 @@ export interface SessionStorage {
   remove(keys: string[]): Promise<void>;
 }
 export interface ExtensionTabs {
-  get(id: number): Promise<{ id?: number; url?: string }>;
+  get(id: number): Promise<{ id?: number; url?: string; windowId?: number }>;
   create(options: { url: string }): Promise<{ id?: number }>;
   update(id: number, options: { url?: string; active?: boolean }): Promise<unknown>;
+}
+export interface ExtensionWindows {
+  create(options: { url: string; type: 'normal'; width: number; height: number }): Promise<{ id?: number; tabs?: { id?: number }[] }>;
+  get(id: number): Promise<{ type?: string }>;
+  update(id: number, options: { focused: boolean }): Promise<unknown>;
 }
 type Binding = { monitorTabId: number; targetTabId: number; videoId: string; liveChatId?: string };
 const BINDING = 'youtube.monitorBinding';
@@ -29,8 +34,8 @@ function tabId(sender: MessageSender): number | undefined {
 }
 function text(value: unknown): value is string { return typeof value === 'string' && value.length > 0 && value.length <= 10000; }
 
-export function createYouTubeHandler({ session, tabs, runtime, client, initialize, readApiKey, moderation, hiddenAuthors, readConfirmation = async () => false, now = Date.now }: {
-  session: SessionStorage; tabs: ExtensionTabs;
+export function createYouTubeHandler({ session, tabs, windows, runtime, client, initialize, readApiKey, moderation, hiddenAuthors, readConfirmation = async () => false, now = Date.now }: {
+  session: SessionStorage; tabs: ExtensionTabs; windows: ExtensionWindows;
   runtime: { id: string; getURL(path: string): string; sendMessage(message: unknown): Promise<unknown> };
   client: YouTubeClient; initialize: () => Promise<void>; readApiKey: () => Promise<string | undefined>; now?: () => number;
   moderation?: ReturnType<typeof createModeration>;
@@ -145,8 +150,10 @@ export function createYouTubeHandler({ session, tabs, runtime, client, initializ
       if (!currentEpoch() || staleCollection()) return failure('aborted');
       if (message.type === 'youtube.openMonitor') return await stateExclusive(async () => {
         if (!currentEpoch()) return failure('aborted');
-        if (!Number.isSafeInteger(message.tabId) || typeof message.videoId !== 'string'
-          || videoIdFromUrl((await tabs.get(message.tabId as number)).url) !== message.videoId) return failure('invalidInput');
+        if (!Number.isSafeInteger(message.tabId) || typeof message.videoId !== 'string') return failure('invalidInput');
+        const target = await tabs.get(message.tabId as number);
+        if (videoIdFromUrl(target.url) !== message.videoId) return failure('invalidInput');
+        if (target.windowId === undefined || !Number.isSafeInteger(target.windowId) || target.windowId < 0) return failure('network');
         if (!currentEpoch()) return failure('aborted');
         inflight?.controller.abort();
         collectionGeneration++; observations.clear();
@@ -154,18 +161,31 @@ export function createYouTubeHandler({ session, tabs, runtime, client, initializ
         if (!currentEpoch()) return failure('aborted');
         moderation?.reset();
         let monitorTabId: number | undefined;
+        let reuseWindowId: number | undefined;
         if (previous) {
-          try { if ((await tabs.get(previous.monitorTabId)).url === runtime.getURL('monitor.html')) monitorTabId = previous.monitorTabId; } catch { /* Closed. */ }
+          try {
+            const viewer = await tabs.get(previous.monitorTabId);
+            if (viewer.url === runtime.getURL('monitor.html') && viewer.windowId !== undefined
+              && Number.isSafeInteger(viewer.windowId) && viewer.windowId >= 0 && viewer.windowId !== target.windowId
+              && (await windows.get(viewer.windowId)).type === 'normal') {
+              monitorTabId = previous.monitorTabId; reuseWindowId = viewer.windowId;
+            }
+          } catch { /* Closed or unavailable. */ }
         }
         // Write binding before navigating to the exact allowlisted page (no query/hash or keys).
-        if (monitorTabId === undefined) monitorTabId = (await tabs.create({ url: 'about:blank' })).id;
-        if (monitorTabId === undefined) return failure('network');
+        if (monitorTabId === undefined) {
+          const created = await windows.create({ url: 'about:blank', type: 'normal', width: 480, height: 800 });
+          if (created.id === undefined || !Number.isSafeInteger(created.id) || created.id < 0 || created.id === target.windowId) return failure('network');
+          monitorTabId = created.tabs?.[0]?.id;
+        }
+        if (monitorTabId === undefined || !Number.isSafeInteger(monitorTabId) || monitorTabId < 0) return failure('network');
         await session.set({ [BINDING]: { monitorTabId, targetTabId: message.tabId, videoId: message.videoId } });
         bindingGeneration++;
         moderation?.reset();
         if (previous?.monitorTabId === monitorTabId) await notify({ type: 'youtube.targetChanged' });
         activeBinding = { generation: bindingGeneration, binding: { monitorTabId, targetTabId: message.tabId as number, videoId: message.videoId } };
         await tabs.update(monitorTabId, { url: runtime.getURL('monitor.html'), active: true });
+        if (reuseWindowId !== undefined) await windows.update(reuseWindowId, { focused: true });
         return { ok: true, value: { monitorTabId } };
       });
       const selectedGeneration = bindingGeneration;

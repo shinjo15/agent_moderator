@@ -46,7 +46,7 @@ for (const [type, responseFails] of [
         } });
       });
       await page.goto(`chrome-extension://${id}/monitor.html`);
-      await expect(page.getByRole('heading', { name: 'YouTubeライブチャット取得' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '独立チャットビューアー · YouTube Live' })).toBeVisible();
       await page.evaluate(type => monitorRace.notify({ type, available: false }), type);
       await expect(page.getByRole('button', { name: '取得を開始' })).toBeDisabled();
       const before = await page.locator('main').textContent();

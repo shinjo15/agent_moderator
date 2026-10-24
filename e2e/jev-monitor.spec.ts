@@ -81,7 +81,9 @@ test('production MV3: 既取得fixture→background→Jev全項目fixture→表�
     monitor.on('console', message => logs.push(message.text())); monitor.on('pageerror', error => logs.push(error.message));
     await expect(monitor.getByRole('button', { name: '取得を開始', exact: true })).toBeEnabled();
     await expect(monitor.getByRole('button', { name: 'Jev判定を有効化・再開' })).toBeVisible();
+    await monitor.getByRole('button', { name: '利用と判定について', exact: true }).click();
     await expect(monitor.getByText(/本文と投稿時刻のみ/)).toBeVisible();
+    await monitor.keyboard.press('Escape');
     await monitor.getByRole('button', { name: '取得を開始', exact: true }).click();
     await expect(monitor.locator('#messages li')).toHaveCount(2, { timeout: 12000 });
     await expect(monitor.locator('#messages li').first()).toContainText('未判定'); expect(requests).toHaveLength(0);

@@ -1,7 +1,8 @@
-import type { ExtensionTabs, SessionStorage } from './background-handler';
+import type { ExtensionTabs, ExtensionWindows, SessionStorage } from './background-handler';
 
 type Tab = { id?: number; url?: string };
 export const platform = (globalThis as unknown as { chrome: {
+  windows: ExtensionWindows;
   tabs: ExtensionTabs & {
     query(options: { active: boolean; currentWindow: boolean }): Promise<Tab[]>;
     onUpdated: { addListener(listener: (id: number, change: { url?: string }, tab: Tab) => void): void };
