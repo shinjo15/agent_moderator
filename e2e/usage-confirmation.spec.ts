@@ -40,9 +40,9 @@ test('MV3利用条件: 掲載案リンク・明示確認・複数設定画面・
     await expect(options.getByTestId('confirmation-status')).toContainText('同意済み');
     await expect(second.getByTestId('confirmation-status')).toContainText('同意済み');
     expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.get' })))
-      .toEqual({ ok: true, value: { confirmed: true, version: 3 } });
+      .toEqual({ ok: true, value: { confirmed: true, version: 4 } });
     expect(await worker.evaluate(async () => (await chrome.storage.local.get(['usage.confirmation']))['usage.confirmation']))
-      .toEqual({ version: 3 });
+      .toEqual({ version: 4 });
     await context.close(); context = await launch();
     worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker'); id = new URL(worker.url()).hostname;
     options = await context.newPage(); await options.goto(`chrome-extension://${id}/options.html`);
@@ -84,13 +84,13 @@ test('確認準備write成功・readback拒否・rollback拒否の後もブラ�
         return get(keys);
       };
     });
-    expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.confirm', version: 3 }))).toMatchObject({ ok: false });
+    expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.confirm', version: 4 }))).toMatchObject({ ok: false });
     expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.get' }))).toMatchObject({ ok: true, value: { confirmed: false } });
     await context.close(); context = await launch();
     worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker'); id = new URL(worker.url()).hostname;
     options = await context.newPage(); await options.goto(`chrome-extension://${id}/options.html`);
     await expect(options.getByTestId('confirmation-status')).toContainText('未同意');
     expect(await worker.evaluate(async () => (await chrome.storage.local.get(['usage.confirmation']))['usage.confirmation'])).toEqual({ version: -1 });
-    expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.confirm', version: 3 }))).toMatchObject({ ok: true, value: { confirmed: true } });
+    expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.confirm', version: 4 }))).toMatchObject({ ok: true, value: { confirmed: true } });
   } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
 });

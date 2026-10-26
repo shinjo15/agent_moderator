@@ -134,7 +134,7 @@ test('MV3 統合: 未確認でも全削除可能、削除後の未確認明示�
       .toMatchObject({ ok: false, error: { code: 'confirmationRequired' } });
     expect(youtubeCalls).toBe(0); expect(jevCalls).toBe(0);
     expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.get' })))
-      .toEqual({ ok: true, value: { confirmed: false, version: 3 } });
+      .toEqual({ ok: true, value: { confirmed: false, version: 4 } });
     await expect.poll(async () => (await worker.evaluate(() => chrome.storage.session.get(null)))['hidden.collectionPaused']).toBe(true);
   } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
 });

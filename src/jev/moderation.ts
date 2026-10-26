@@ -147,5 +147,8 @@ export function createModeration({ client, readKey, session, now = Date.now, rea
     void result.finally(() => pending.delete(id));
     return result;
   }
-  return { observe, enable, evaluate, stop, stopCollection, reset, isEnabled: () => enabled };
+  // The retained target is owned by background history, never by UI payloads.
+  // Identity changes/disappears on eviction or collection reset, invalidating cached evidence.
+  return { observe, enable, evaluate, stop, stopCollection, reset, isEnabled: () => enabled,
+    target: (id: string) => history.context(id)?.target };
 }

@@ -4,7 +4,8 @@ import { CONFIRMATION_VERSION } from '../src/confirmation';
 const video = 'UC0000000000000000000000'; const author = 'UCabcdefghijklmnopqrstuv';
 function fixture() {
   const values: Record<string, unknown> = {
-    [`hiddenAuthors.channel.${video}`]: { ids: [author], displayNames: { [author]: '名前' }, revisions: {}, migratedVideos: ['abcdefghijk'] },
+    [`hiddenAuthors.channel.${video}`]: { ids: [author], displayNames: { [author]: '名前' }, revisions: {}, migratedVideos: ['abcdefghijk'],
+      triggerComments: { [author]: { text: '削除対象の登録時本文', videoId: 'abcdefghijk' } } },
     'hiddenAuthors.zyxwvutsrqp': { ids: [], revisions: { [author]: 3 } },
     'apiKey.youtube': 'synthetic', 'apiKey.jev': 'synthetic', 'moderation.threshold': 0.8,
     'youtube.cooldown': { notBefore: 99999 }, 'usage.confirmation': { version: CONFIRMATION_VERSION }, unrelated: true,
@@ -34,7 +35,7 @@ it.each(['add', 'updateDisplayName', 'remove'] as const)('storage読取待ちと
   let enter!: () => void; let release!: () => void;
   const entered = new Promise<void>(done => { enter = done; }); const gate = new Promise<void>(done => { release = done; });
   storage.get.mockImplementationOnce(async () => { const snapshot = structuredClone(values); enter(); await gate; return snapshot; });
-  const first = operation === 'add' ? store.add(video, author, 0) : operation === 'remove' ? store.remove(video, author) : store.updateDisplayName(video, author, 0, '古い名前');
+  const first = operation === 'add' ? store.add(video, author, 0, () => true, undefined, { text: '古い本文', videoId: 'abcdefghijk' }) : operation === 'remove' ? store.remove(video, author) : store.updateDisplayName(video, author, 0, '古い名前');
   await entered;
   const queued = store.add('UC1111111111111111111111', author, 0);
   const clear = store.clearAll(); release();

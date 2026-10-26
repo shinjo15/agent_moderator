@@ -2,9 +2,16 @@ import { createBoundedQueue } from '../retention';
 import { validChannelId, validDisplayName } from '../youtube/contracts';
 type Storage = { get(keys: string[]): Promise<Record<string, unknown>>; set(values: Record<string, unknown>): Promise<void>;
   remove?(keys: string[]): Promise<void> };
-type State = { ids: string[]; revisions: Record<string, number>; displayNames: Record<string, string>; migratedVideos?: string[] };
-export type HiddenAuthor = { authorChannelId: string; displayName?: string };
+type State = { ids: string[]; revisions: Record<string, number>; displayNames: Record<string, string>; migratedVideos?: string[];
+  triggerComments?: Record<string, TriggerComment> };
+export type TriggerComment = { text: string; videoId: string };
+export type HiddenAuthor = { authorChannelId: string; displayName?: string; triggerComment?: TriggerComment };
 export const validVideo = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{11}$/.test(value);
+export function validTriggerComment(value: unknown): value is TriggerComment {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const comment = value as Partial<TriggerComment>;
+  return typeof comment.text === 'string' && validVideo(comment.videoId);
+}
 export const validAuthor = validChannelId;
 export function createHiddenAuthors({ storage, initialize }: { storage: Storage; initialize(): Promise<void> }) {
   const exclusive = createBoundedQueue();
@@ -26,12 +33,18 @@ export function createHiddenAuthors({ storage, initialize }: { storage: Storage;
     const state = value as Partial<State> | undefined;
     if (value === undefined) return { ids: [], revisions: {}, displayNames: {} };
     if (!state || Array.isArray(state) || !Array.isArray(state.ids) || !state.ids.every(validAuthor)
+      || new Set(state.ids).size !== state.ids.length
       || typeof state.revisions !== 'object' || state.revisions === null || Array.isArray(state.revisions)
       || !Object.entries(state.revisions).every(([id, n]) => validAuthor(id) && Number.isSafeInteger(n) && n >= 0)
       || (state.migratedVideos !== undefined && (!Array.isArray(state.migratedVideos) || !state.migratedVideos.every(validVideo)))) throw new Error('Invalid hidden state');
     const ids = state.ids.filter(validAuthor); const retained = new Set(ids);
     const names = state.displayNames;
+    const comments = state.triggerComments;
+    const triggerComments = Object.fromEntries(comments && typeof comments === 'object' && !Array.isArray(comments)
+      ? Object.entries(comments).filter(([id, comment]) => retained.has(id) && validTriggerComment(comment))
+        .map(([id, comment]) => [id, { text: comment.text, videoId: comment.videoId }]) : []);
     return { ids, revisions: Object.fromEntries(Object.entries(state.revisions).filter(([id, n]) => validAuthor(id) && Number.isSafeInteger(n) && n >= 0)),
+      ...(Object.keys(triggerComments).length ? { triggerComments } : {}),
       displayNames: Object.fromEntries(names && typeof names === 'object' && !Array.isArray(names)
         ? Object.entries(names).filter(([id, name]) => retained.has(id) && validDisplayName(name)) : []),
       ...(Array.isArray(state.migratedVideos) ? { migratedVideos: state.migratedVideos.filter(validVideo) } : {}) };
@@ -113,10 +126,11 @@ export function createHiddenAuthors({ storage, initialize }: { storage: Storage;
     listAuthors(channel: string): Promise<HiddenAuthor[]> { return exclusive(async () => {
       const state = await read(channel);
       return state.ids.map(authorChannelId => ({ authorChannelId,
+        ...(state.triggerComments?.[authorChannelId] === undefined ? {} : { triggerComment: state.triggerComments[authorChannelId] }),
         ...(state.displayNames[authorChannelId] === undefined ? {} : { displayName: state.displayNames[authorChannelId] }) }));
     }); },
     revision(channel: string, author: string) { return exclusive(async () => { if (!validAuthor(author)) throw new Error('Invalid author'); return (await read(channel)).revisions[author] ?? 0; }); },
-    add(channel: string, author: string, revision: number, current = () => true, displayName?: string) {
+    add(channel: string, author: string, revision: number, current = () => true, displayName?: string, triggerComment?: TriggerComment) {
       const selectedEpoch = epoch; const writable = !clearing;
       return exclusive(async () => {
         if (!validAuthor(author)) throw new Error('Invalid author');
@@ -124,6 +138,8 @@ export function createHiddenAuthors({ storage, initialize }: { storage: Storage;
         if (!writable || clearing || selectedEpoch !== epoch || !current() || (state.revisions[author] ?? 0) !== revision || state.ids.includes(author)) return;
         state.ids.push(author);
         if (validDisplayName(displayName)) state.displayNames[author] = displayName;
+        if (validTriggerComment(triggerComment)) state.triggerComments = { ...state.triggerComments,
+          [author]: { text: triggerComment.text, videoId: triggerComment.videoId } };
         await storage.set({ [key(channel)]: state });
       });
     },
@@ -150,6 +166,10 @@ export function createHiddenAuthors({ storage, initialize }: { storage: Storage;
         if (requireHidden && !state.ids.includes(author)) return;
         state.ids = state.ids.filter(id => id !== author);
         delete state.displayNames[author];
+        if (state.triggerComments) {
+          delete state.triggerComments[author];
+          if (!Object.keys(state.triggerComments).length) delete state.triggerComments;
+        }
         state.revisions[author] = (state.revisions[author] ?? 0) + 1;
         await storage.set({ [key(channel)]: state });
       });

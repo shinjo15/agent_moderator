@@ -34,7 +34,7 @@ test('既存panel内で開発版の案へ明示同意し、同梱規約は未マ
     await checkbox.check(); await expect(save).toBeEnabled();
     await checkbox.uncheck(); await expect(save).toBeDisabled();
     expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.get' })))
-      .toEqual({ ok: true, value: { confirmed: false, version: 3 } });
+      .toEqual({ ok: true, value: { confirmed: false, version: 4 } });
     const opened = context.waitForEvent('page'); await link.click();
     const terms = await opened; await terms.waitForLoadState();
     expect(terms.url()).toBe(`chrome-extension://${id}/terms.html`);
@@ -46,6 +46,6 @@ test('既存panel内で開発版の案へ明示同意し、同梱規約は未マ
     await expect(terms.locator('script')).toHaveAttribute('src', 'terms.js');
     await expect(terms.locator('script')).toHaveText('');
     expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.get' })))
-      .toEqual({ ok: true, value: { confirmed: false, version: 3 } });
+      .toEqual({ ok: true, value: { confirmed: false, version: 4 } });
   } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
 });

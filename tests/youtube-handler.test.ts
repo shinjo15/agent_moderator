@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { createYouTubeHandler } from '../src/youtube/background-handler';
-import { failure } from '../src/youtube/contracts';
+import { failure, type ChatMessage } from '../src/youtube/contracts';
 import { createChatMonitor } from '../src/youtube/monitor';
 import { createModeration as createUnconfirmedModeration } from '../src/jev/moderation';
 import { createJevClient } from './fixtures/jev-client';
@@ -38,6 +38,80 @@ function setup() {
 const popup = { id: 'test', url: 'chrome-extension://test/popup.html' };
 const monitor = { id: 'test', url: 'chrome-extension://test/monitor.html', tab: { id: 10 } };
 const open = { type: 'youtube.openMonitor', tabId: 9, videoId: 'abcdefghijk' };
+
+it('AIの根拠は最初のbackground対象本文へ拘束し、同ID再取得・同名別ID・後続・cached評価で差し替えない', async () => {
+  const { deps, advance } = setup(); const channel = 'UC0000000000000000000000';
+  const author = 'UCabcdefghijklmnopqrstuv'; const other = 'UCzyxwvutsrqponmlkjihgfe';
+  const hiddenAuthors = createHiddenAuthors({ storage: deps.session, initialize: deps.initialize });
+  const entered = deferred(); const response = deferred<Response>();
+  const fetcher = vi.fn(async () => { entered.resolve(); return response.promise; });
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic' });
+  const handler = createYouTubeHandler({ ...deps, hiddenAuthors, moderation });
+  await handler.handle(open, popup); await handler.handle({ type: 'jev.enable' }, monitor);
+  await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'resolve' }, monitor);
+  async function list(messages: ChatMessage[]) {
+    advance(8000); deps.client.listMessages.mockResolvedValue({ ok: true, value: { messages, nextPageToken: 'next', pollingIntervalMillis: 8000, ended: false } });
+    await handler.handle({ type: 'youtube.list', liveChatId: 'chat-1', requestId: 'list' }, monitor);
+  }
+  await list([{ ...chatPost('target'), authorChannelId: author, authorDisplayName: '同名', text: '実際に評価した本文' }]);
+  const pending = handler.handle({ type: 'jev.evaluate', id: 'target' }, monitor); await entered.promise;
+  await list([{ ...chatPost('target'), authorChannelId: author, text: '同IDの差替本文' },
+    { ...chatPost('other'), authorChannelId: other, authorDisplayName: '同名', text: '別人の本文' }]);
+  response.resolve(new Response(JSON.stringify(apiResponse({ attack: 1 })))); await pending;
+  const expected = [{ authorChannelId: author, displayName: '同名', triggerComment: { text: '実際に評価した本文', videoId: open.videoId } }];
+  expect(await hiddenAuthors.listAuthors(channel)).toEqual(expected);
+  await list([{ ...chatPost('later'), authorChannelId: author, text: '後続本文' }]);
+  await handler.handle({ type: 'jev.evaluate', id: 'target' }, monitor);
+  expect(await hiddenAuthors.listAuthors(channel)).toEqual(expected); expect(fetcher).toHaveBeenCalledTimes(1);
+  fetcher.mockImplementation(async () => new Response(JSON.stringify(apiResponse({ attack: 1 }))));
+  deps.tabs.get.mockImplementation(async id => ({ id, url: id === 9 ? 'https://www.youtube.com/watch?v=zyxwvutsrqp' : monitor.url }));
+  await handler.targetChanged(9, 'https://www.youtube.com/watch?v=zyxwvutsrqp'); advance(8000);
+  await handler.handle({ type: 'youtube.resolve', videoId: 'zyxwvutsrqp', requestId: 'next-video' }, monitor);
+  await list([{ ...chatPost('new-video'), authorChannelId: author, text: '同channel別動画の本文' }]);
+  expect(await handler.handle({ type: 'jev.evaluate', id: 'new-video' }, monitor)).toMatchObject({ ok: true, value: { malicious: true } });
+  expect(await hiddenAuthors.listAuthors(channel)).toEqual(expected);
+  moderation.reset();
+});
+
+it('停止で本文履歴を失ったcached判定は同IDの再取得本文へ付け替えて解除済み投稿者を再登録しない', async () => {
+  const { deps, advance } = setup(); const channel = 'UC0000000000000000000000'; const author = 'UCabcdefghijklmnopqrstuv';
+  const hiddenAuthors = createHiddenAuthors({ storage: deps.session, initialize: deps.initialize });
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(apiResponse({ attack: 1 }))));
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic' });
+  const handler = createYouTubeHandler({ ...deps, hiddenAuthors, moderation });
+  await handler.handle(open, popup); await handler.handle({ type: 'jev.enable' }, monitor);
+  await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'resolve' }, monitor);
+  async function list(text: string) {
+    advance(8000); deps.client.listMessages.mockResolvedValue({ ok: true, value: {
+      messages: [{ ...chatPost('same-id'), authorChannelId: author, text }], nextPageToken: 'next', pollingIntervalMillis: 8000, ended: false,
+    } });
+    await handler.handle({ type: 'youtube.list', liveChatId: 'chat-1', requestId: 'list' }, monitor);
+  }
+  await list('元の対象'); await handler.handle({ type: 'jev.evaluate', id: 'same-id' }, monitor);
+  await hiddenAuthors.remove(channel, author);
+  await handler.handle({ type: 'jev.stopCollection' }, monitor);
+  await handler.handle({ type: 'youtube.start', explicit: true, videoId: open.videoId }, monitor);
+  await list('停止後に差し替えられた本文');
+  expect(await handler.handle({ type: 'jev.evaluate', id: 'same-id' }, monitor)).toMatchObject({ ok: true, value: { malicious: true } });
+  expect(await hiddenAuthors.listAuthors(channel)).toEqual([]); expect(fetcher).toHaveBeenCalledTimes(1); moderation.reset();
+});
+
+it.each(['ai', 'burst'] as const)('本文保存の同意gate: %sの判定後に現行同意を確認できなければ新規保存しない', async mode => {
+  const { deps, advance } = setup();
+  const channel = 'UC0000000000000000000000'; const author = 'UCabcdefghijklmnopqrstuv';
+  const hiddenAuthors = createHiddenAuthors({ storage: deps.session, initialize: deps.initialize });
+  const moderation = createModeration({ client: createJevClient(async () => new Response(JSON.stringify(apiResponse({ attack: 1 })))), readKey: async () => 'synthetic' });
+  const handler = createYouTubeHandler({ ...deps, hiddenAuthors, moderation });
+  await handler.handle(open, popup); await handler.handle({ type: 'jev.enable' }, monitor);
+  await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'resolve' }, monitor); advance(8000);
+  deps.client.listMessages.mockImplementation(async () => {
+    if (mode === 'burst') deps.readConfirmation.mockResolvedValue(false);
+    return { ok: true, value: { messages: Array.from({ length: mode === 'burst' ? 10 : 1 }, (_, n) => ({ ...chatPost(`gate-${n}`, n * 1000), authorChannelId: author })), nextPageToken: 'next', pollingIntervalMillis: 8000, ended: false } };
+  });
+  await handler.handle({ type: 'youtube.list', liveChatId: 'chat-1', requestId: 'list' }, monitor);
+  if (mode === 'ai') { deps.readConfirmation.mockResolvedValue(false); await handler.handle({ type: 'jev.evaluate', id: 'gate-0' }, monitor); }
+  expect(await hiddenAuthors.listAuthors(channel)).toEqual([]); moderation.reset();
+});
 
 it('自動Start成功後の全削除は通知未配送でも旧UIのresolve/listを拒否し、明示Startだけ再開する', async () => {
   const { deps, values, advance } = setup();
@@ -402,9 +476,9 @@ it('再resolve前に受信しbinding読取待ちの旧listは、同scope再確�
   expect(await stale).toMatchObject({ ok: false }); expect(deps.client.listMessages).not.toHaveBeenCalled();
 });
 
-it('scope変更前の版2同意ではYouTube/Jevを送信せず版3への再同意を要求する', async () => {
+it('本文保存前の版3同意ではYouTube/Jevを送信せず版4への再同意を要求する', async () => {
   const { deps } = setup();
-  const confirmation = createConfirmation({ storage: { get: async () => ({ [CONFIRMATION_KEY]: { version: 2 } }), set: async () => {} }, initialize: deps.initialize });
+  const confirmation = createConfirmation({ storage: { get: async () => ({ [CONFIRMATION_KEY]: { version: 3 } }), set: async () => {} }, initialize: deps.initialize });
   const jev = vi.fn(async () => new Response(JSON.stringify(apiResponse())));
   const moderation = createUnconfirmedModeration({ client: createJevClient(jev), readKey: async () => 'synthetic', readConfirmation: confirmation.read });
   const handler = createYouTubeHandler({ ...deps, moderation, readConfirmation: confirmation.read });
@@ -412,7 +486,7 @@ it('scope変更前の版2同意ではYouTube/Jevを送信せず版3への再同�
   expect(await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'version2' }, monitor)).toMatchObject({ ok: false, error: { code: 'confirmationRequired' } });
   expect(await handler.handle({ type: 'jev.enable' }, monitor)).toMatchObject({ ok: false, error: { code: 'confirmationRequired' } });
   expect(deps.client.resolveVideo).not.toHaveBeenCalled(); expect(jev).not.toHaveBeenCalled();
-  expect(CONFIRMATION_VERSION).toBe(3);
+  expect(CONFIRMATION_VERSION).toBe(4);
 });
 
 it('復元bindingの配信者欠落/不正ではlistを送信せず再resolveを要求する', async () => {
@@ -904,7 +978,8 @@ it('公式取得とJev確定だけを配信別登録し、解除済みの同じ�
   expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([]);
   await handler.handle({ type: 'jev.evaluate', id: 'actual' }, monitor);
   expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([author]);
-  expect(await hiddenAuthors.listAuthors('UC0000000000000000000000')).toEqual([{ authorChannelId: author, displayName: 'みどり' }]);
+  expect(await hiddenAuthors.listAuthors('UC0000000000000000000000')).toEqual([{ authorChannelId: author, displayName: 'みどり',
+    triggerComment: { text: chatPost('actual').text, videoId: open.videoId } }]);
   await hiddenAuthors.remove('UC0000000000000000000000', author);
   await handler.handle({ type: 'jev.evaluate', id: 'actual' }, monitor);
   expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([]);
@@ -913,7 +988,8 @@ it('公式取得とJev確定だけを配信別登録し、解除済みの同じ�
   await handler.handle({ type: 'youtube.list', requestId: 'r3', liveChatId: 'chat-1' }, monitor);
   await handler.handle({ type: 'jev.evaluate', id: 'new' }, monitor);
   expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([author]);
-  expect(await hiddenAuthors.listAuthors('UC0000000000000000000000')).toEqual([{ authorChannelId: author, displayName: 'みどりの庭' }]);
+  expect(await hiddenAuthors.listAuthors('UC0000000000000000000000')).toEqual([{ authorChannelId: author, displayName: 'みどりの庭',
+    triggerComment: { text: chatPost('new', 9000).text, videoId: open.videoId } }]);
 });
 it('遅い判定中に既取得の名前が変わっても登録には最新観測名を使い、古いcached判定は名前を戻さない', async () => {
   const { deps, advance } = setup();
@@ -935,11 +1011,13 @@ it('遅い判定中に既取得の名前が変わっても登録には最新観�
   // A repeated message can carry a newly acquired name; identity/revision stay fixed.
   await list('old', 'みどりの小道');
   response.resolve(new Response(JSON.stringify(apiResponse({ attack: 1 })))); await evaluation;
-  expect(await hiddenAuthors.listAuthors('UC0000000000000000000000')).toEqual([{ authorChannelId: author, displayName: 'みどりの小道' }]);
+  expect(await hiddenAuthors.listAuthors('UC0000000000000000000000')).toEqual([{ authorChannelId: author, displayName: 'みどりの小道',
+    triggerComment: { text: chatPost('old').text, videoId: open.videoId } }]);
   await list('changed', 'みどりの森');
   await handler.handle({ type: 'jev.evaluate', id: 'old' }, monitor);
   await list('missing');
-  expect(await hiddenAuthors.listAuthors('UC0000000000000000000000')).toEqual([{ authorChannelId: author, displayName: 'みどりの森' }]);
+  expect(await hiddenAuthors.listAuthors('UC0000000000000000000000')).toEqual([{ authorChannelId: author, displayName: 'みどりの森',
+    triggerComment: { text: chatPost('old').text, videoId: open.videoId } }]);
   await hiddenAuthors.remove('UC0000000000000000000000', author);
   await handler.handle({ type: 'jev.evaluate', id: 'old' }, monitor);
   expect(await hiddenAuthors.listAuthors('UC0000000000000000000000')).toEqual([]);
@@ -959,7 +1037,8 @@ it('Jev未有効化でも取得済み10秒10件のローカル連投を直ちに
   await handler.handle({ type: 'youtube.list', requestId: 'r2', liveChatId: 'chat-1' }, monitor);
   expect(await hiddenAuthors.list('UC0000000000000000000000')).toEqual([author]);
   expect(fetcher).not.toHaveBeenCalled();
-  expect(await hiddenAuthors.listAuthors('UC0000000000000000000000')).toEqual([{ authorChannelId: author, displayName: 'さくら' }]);
+  expect(await hiddenAuthors.listAuthors('UC0000000000000000000000')).toEqual([{ authorChannelId: author, displayName: 'さくら',
+    triggerComment: { text: chatPost('burst-9', 9000).text, videoId: open.videoId } }]);
 });
 it('exact bindingだけがJevを有効化でき実list由来IDのみ評価、本文payloadは禁止', async () => {
   const { deps, advance } = setup();

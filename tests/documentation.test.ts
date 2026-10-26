@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { expect, it } from 'vitest';
 
-it('配信者scope・遅延移行・解除保護と版3再同意を日英UIと既存文書へ説明する', () => {
+it('配信者scope・遅延移行・解除保護と版4再同意を日英UIと既存文書へ説明する', () => {
   for (const locale of ['ja', 'en']) {
     const messages = JSON.parse(readFileSync(`public/_locales/${locale}/messages.json`, 'utf8'));
     expect(messages.hiddenStorage.message).toContain(locale === 'ja' ? '配信者' : 'broadcaster');
@@ -10,9 +10,24 @@ it('配信者scope・遅延移行・解除保護と版3再同意を日英UIと�
     expect(messages.termsFunction.message).toContain(locale === 'ja' ? '配信者' : 'broadcaster');
   }
   const privacy = readFileSync('docs/privacy.md', 'utf8');
-  for (const token of ['hiddenAuthors.channel.', 'migratedVideos', '遅延移行', '版3', '旧形式']) expect(privacy).toContain(token);
+  for (const token of ['hiddenAuthors.channel.', 'migratedVideos', '遅延移行', '版4', '旧形式', 'triggerComments', '登録時のコメント']) expect(privacy).toContain(token);
   expect(readFileSync('docs/onboarding.md', 'utf8')).toContain('同じ配信者の別ライブ');
   expect(readFileSync('docs/terms.md', 'utf8')).toContain('配信者');
+});
+
+it('保存本文の1投稿者1件・削除を既存文書と日英の同意説明で明示する', () => {
+  for (const path of ['docs/privacy.md', 'docs/terms.md', 'docs/onboarding.md']) {
+    const text = readFileSync(path, 'utf8');
+    expect(text).toContain('登録時のコメント'); expect(text).toContain('本文');
+    expect(text).toContain('1件'); expect(text).toContain('解除');
+  }
+  for (const locale of ['ja', 'en']) {
+    const messages = JSON.parse(readFileSync(`public/_locales/${locale}/messages.json`, 'utf8'));
+    for (const key of ['sendingDisclosure', 'hiddenStorage', 'termsSending', 'clearExplanation']) {
+      expect(messages[key].message).toContain(locale === 'ja' ? '登録時のコメント' : 'comment that triggered hiding');
+    }
+    expect(messages.visibleLimit.message).not.toContain(locale === 'ja' ? '本文の永続保存はしません' : 'without archiving text');
+  }
 });
 
 it('READMEから日本語導入手順へ辿れ、導入手順のローカルリンクが存在する', () => {
