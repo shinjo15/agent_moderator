@@ -203,11 +203,25 @@ const monitor = createChatMonitor({ transport: createRuntimeTransport(),
       text.className = 'chat-text';
       text.textContent = message.text;
       content.append(avatar, author, text);
+      if (message.type === 'superChatEvent') {
+        item.classList.add('paid');
+        item.dataset.tier = message.superChat?.tier === undefined ? 'unknown' : String(message.superChat.tier);
+        content.classList.add('paid-card'); content.setAttribute('role', 'group'); content.setAttribute('aria-label', t('superChat'));
+        const head = document.createElement('div'); head.className = 'paid-header';
+        const identity = document.createElement('div'); identity.className = 'paid-identity';
+        const amount = document.createElement('span'); amount.className = 'paid-amount';
+        amount.textContent = message.superChat?.amountDisplayString ?? t('superChat');
+        identity.append(author, amount); head.append(avatar, identity);
+        content.replaceChildren(head);
+        if (message.text.trim()) { text.classList.add('paid-body'); content.append(text); }
+      }
       item.append(content);
       parking.append(item);
       retained.push({ author: message.authorChannelId, item, admitted: false, avatar, imageUrl: message.authorProfileImageUrl });
       while (retained.length > MAX_VISIBLE_MESSAGES) jev.remove(retained.shift()!.item);
       jev.add(message.id, message.authorChannelId, item);
+      // Keep moderation's existing lifecycle; only its badge placement differs.
+      if (message.type === 'superChatEvent') content.querySelector('.paid-header')!.append(item.querySelector('.score-badge')!);
     }
     // A new batch may already have registered a burst in background storage.
     // Never admit its rows using the previous snapshot.

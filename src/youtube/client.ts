@@ -1,4 +1,4 @@
-import { failure, validChannelId, validDisplayName, validProfileImageUrl, type ChatMessage, type ChatPage, type ResolvedVideo, type Result, type YouTubeClient } from './contracts';
+import { failure, parseSuperChat, validChannelId, validDisplayName, validProfileImageUrl, type ChatMessage, type ChatPage, type ResolvedVideo, type Result, type YouTubeClient } from './contracts';
 import { publicationTime } from './published-at';
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -41,8 +41,13 @@ function parsePage(body: unknown): Result<ChatPage> {
     const snippet = item.snippet;
     if (snippet.type === 'chatEndedEvent') ended = true;
     if (snippet.hasDisplayContent === false) continue;
-    if (typeof snippet.displayMessage !== 'string' || !record(item.authorDetails) || !nonempty(item.authorDetails.channelId)) return failure('invalidResponse');
-    messages.push({ id: item.id, text: snippet.displayMessage, type: snippet.type as string, authorChannelId: item.authorDetails.channelId,
+    const paid = snippet.type === 'superChatEvent';
+    if ((!paid && typeof snippet.displayMessage !== 'string') || !record(item.authorDetails) || !nonempty(item.authorDetails.channelId)) return failure('invalidResponse');
+    // displayMessage may describe the purchase; only userComment is authored text.
+    const text = paid ? (record(snippet.superChatDetails) && typeof snippet.superChatDetails.userComment === 'string'
+      ? snippet.superChatDetails.userComment : '') : snippet.displayMessage as string;
+    messages.push({ id: item.id, text, type: snippet.type as string, authorChannelId: item.authorDetails.channelId,
+      ...(paid ? { superChat: parseSuperChat(snippet.superChatDetails) } : {}),
       ...(validDisplayName(item.authorDetails.displayName) ? { authorDisplayName: item.authorDetails.displayName } : {}),
       ...(validProfileImageUrl(item.authorDetails.profileImageUrl) ? { authorProfileImageUrl: item.authorDetails.profileImageUrl } : {}),
       ...(publicationTime(snippet.publishedAt) === undefined ? {} : { publishedAt: snippet.publishedAt as string }) });

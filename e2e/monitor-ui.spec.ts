@@ -10,7 +10,7 @@ declare const monitorFixture: { append(): void; appendMany(count: number): void;
 const authorId = (id: string) => `UC${id.padEnd(22, '_')}`;
 
 // Assigned UI fixture results, not live API output or model accuracy measurements.
-async function withMonitor(run: (page: Page, worker: Worker) => Promise<void>, locale = 'ja') {
+async function withMonitor(run: (page: Page, worker: Worker) => Promise<void>, locale = 'ja', paid = false) {
   const profile = await mkdtemp(join(tmpdir(), 'agent-moderator-monitor-ui-'));
   const extension = resolve('dist');
   const context = await chromium.launchPersistentContext(profile, {
@@ -22,7 +22,7 @@ async function withMonitor(run: (page: Page, worker: Worker) => Promise<void>, l
     const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
     const page = await context.newPage();
     await page.clock.install();
-    await page.addInitScript(categories => {
+    await page.addInitScript(({ categories, paid }) => {
       let batch = 0;
       let held: Promise<void> | undefined;
       let release = () => {};
@@ -37,7 +37,7 @@ async function withMonitor(run: (page: Page, worker: Worker) => Promise<void>, l
       const message = (id: string) => ({ id, authorChannelId: authorId(id), authorDisplayName: names[id] ?? 'チャット参加者',
         ...(avatars ? { authorProfileImageUrl: id === 'missing' ? 'https://yt3.ggpht.com.evil.invalid/avatar' : `https://${id === 'rounded' ? 'yt3.googleusercontent.com' : 'yt3.ggpht.com'}/${id}` } : {}),
         text: id === 'rounded' ? '<img src=x onerror=alert(1)>' + '長い本文'.repeat(100) : `本文fixture ${id}`,
-        type: 'textMessageEvent' });
+        type: paid ? 'superChatEvent' : 'textMessageEvent', ...(paid ? { superChat: { amountDisplayString: '￥1,000', tier: 4 } } : {}) });
       let queued = [...special, ...Array.from({ length: 45 }, (_, i) => `initial-${i}`)].map(message);
       Object.assign(globalThis, { monitorFixture: {
         setTarget(value: string, pending = false) { video = value; targetPending = pending; },
@@ -84,11 +84,52 @@ async function withMonitor(run: (page: Page, worker: Worker) => Promise<void>, l
         }
         return { ok: true };
       };
-    }, [...keys]);
+    }, { categories: [...keys], paid });
     await page.goto(`chrome-extension://${new URL(worker.url()).hostname}/monitor.html`);
     await run(page, worker);
   } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
 }
+
+test('Super Chat UI fixture: admission保留/解除/200件/過去位置/TTL/切替後の遅延判定', async () => {
+  await withMonitor(async (page, worker) => {
+    const requests: string[] = [];
+    await page.context().route('https://yt3.ggpht.com/**', route => { requests.push(route.request().url()); return route.abort(); });
+    await page.evaluate(() => { monitorFixture.avatars(); monitorFixture.hide(['bad']); monitorFixture.holdHidden(); monitorFixture.hold(); });
+    await page.getByRole('button', { name: '取得を開始', exact: true }).click(); await page.clock.runFor(5100);
+    await expect(page.locator('#messages > li')).toHaveCount(0); expect(requests).toEqual([]);
+    await page.evaluate(() => monitorFixture.releaseHidden()); await page.clock.runFor(30);
+    await expect(page.locator('#messages .paid-card')).toHaveCount(51);
+    expect(requests.some(url => url.endsWith('/bad'))).toBe(false);
+    await page.getByRole('button', { name: '非表示一覧', exact: true }).click();
+    await page.locator('#hidden-authors button').click(); await page.keyboard.press('Escape');
+    await expect(page.locator('#messages .paid-card')).toHaveCount(52);
+    await page.clock.runFor(60001); // In-flight result must not turn an expired row into evaluated.
+    await page.evaluate(() => monitorFixture.release()); await page.clock.runFor(30);
+    await expect(page.locator('.score-badge').first()).toHaveText('—');
+    await page.evaluate(() => monitorFixture.appendMany(160)); await page.clock.runFor(5100);
+    await expect(page.locator('#messages > li')).toHaveCount(200);
+    const chat = page.locator('.chat-scroll');
+    await chat.evaluate(element => { element.scrollTop = 1200; }); await page.clock.runFor(30);
+    const anchor = () => page.evaluate(() => {
+      const chat = document.querySelector('.chat-scroll')!; const top = chat.getBoundingClientRect().top;
+      const row = [...chat.querySelectorAll('li')].find(row => row.getBoundingClientRect().bottom > top)!;
+      return { text: row.querySelector('.chat-text')!.textContent, offset: row.getBoundingClientRect().top - top };
+    });
+    const before = await anchor();
+    await page.evaluate(() => monitorFixture.append()); await page.clock.runFor(5100);
+    await expect(page.locator('#messages > li')).toHaveCount(200);
+    const after = await anchor(); expect(after.text).toBe(before.text); expect(Math.abs(after.offset - before.offset)).toBeLessThanOrEqual(1);
+    await page.getByRole('button', { name: '↓ 最新へ戻る', exact: true }).click();
+    await page.evaluate(() => monitorFixture.append()); await page.clock.runFor(5100);
+    expect(await chat.evaluate(element => element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThanOrEqual(2);
+    await page.evaluate(() => { monitorFixture.hold(); monitorFixture.append(); }); await page.clock.runFor(5100);
+    await page.evaluate(() => monitorFixture.setTarget('zyxwvutsrqp'));
+    await worker.evaluate(() => chrome.runtime.sendMessage({ type: 'youtube.targetChanged' }));
+    await page.evaluate(() => monitorFixture.release()); await page.clock.runFor(5100);
+    await expect(page.locator('#messages > li')).toHaveCount(0);
+    await expect(page.locator('.viewer-header')).toContainText('zyxwvutsrqp');
+  }, 'ja', true);
+});
 
 test('切替通知後のstatusが次のnavで保留されてもStopを維持し最終対象へ自動追従する', async () => {
   await withMonitor(async (page, worker) => {
