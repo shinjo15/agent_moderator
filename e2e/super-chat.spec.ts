@@ -36,6 +36,7 @@ for (const locale of ['ja', 'en']) test(`実MV3 Super Chat ${locale}: 公式形�
       paid(10, { amountDisplayString: 100, tier: '7', userComment: null }),
       paid(11, undefined),
       paid(12, { amountDisplayString: '￥50,000', tier: 7, userComment: 'HIDDEN PAID BODY' }),
+      paid(13, { amountDisplayString: '￥100', tier: 1, userComment: body(13) }),
     ];
     await context.route('https://www.youtube.com/**', route => route.fulfill({ contentType: 'text/html', body: '<main id="original">YouTube fixture</main>' }));
     await context.route('https://yt3.ggpht.com/**', route => {
@@ -75,10 +76,10 @@ for (const locale of ['ja', 'en']) test(`実MV3 Super Chat ${locale}: 公式形�
     await monitor.getByRole('button', { name: ja ? 'Jev判定を有効化・再開' : 'Enable / resume Jev evaluation', exact: true }).click();
     await expect(monitor.getByTestId('jev-status')).toContainText(ja ? '有効' : 'enabled');
     await monitor.getByRole('button', { name: ja ? '取得を開始' : 'Start collection', exact: true }).click();
-    await expect(monitor.locator('#messages > li')).toHaveCount(10, { timeout: 15000 });
-    await expect(monitor.locator('#messages .paid-card')).toHaveCount(9);
-    await expect(monitor.getByRole('group', { name: ja ? 'スーパーチャット' : 'Super Chat', exact: true })).toHaveCount(9);
-    await expect.poll(() => states.length).toBe(9);
+    await expect(monitor.locator('#messages > li')).toHaveCount(11, { timeout: 15000 });
+    await expect(monitor.locator('#messages .paid-card')).toHaveCount(10);
+    await expect(monitor.getByRole('group', { name: ja ? 'スーパーチャット' : 'Super Chat', exact: true })).toHaveCount(10);
+    await expect.poll(() => states.length).toBe(10);
     await expect(monitor.locator('#messages')).not.toContainText('PAYMENT DESCRIPTION');
     await expect(monitor.locator('#messages')).not.toContainText('HIDDEN PAID BODY');
     expect(images).not.toContain('https://yt3.ggpht.com/paid-12');
@@ -89,11 +90,36 @@ for (const locale of ['ja', 'en']) test(`実MV3 Super Chat ${locale}: 公式形�
     await expect(monitor.locator('.paid-amount', { hasText: longAmount })).toHaveText(longAmount);
     await expect(monitor.locator('.paid[data-tier="unknown"]')).toHaveCount(3);
     const colors = ['rgb(21, 101, 192)', 'rgb(0, 184, 212)', 'rgb(0, 191, 165)', 'rgb(255, 202, 40)', 'rgb(255, 145, 0)', 'rgb(231, 80, 160)'];
-    for (let i = 0; i < colors.length; i++) await expect(monitor.locator(`.paid[data-tier="${i + 1}"] .paid-header`)).toHaveCSS('background-color', colors[i]);
+    for (let i = 0; i < colors.length; i++) {
+      for (const header of await monitor.locator(`.paid[data-tier="${i + 1}"] .paid-header`).all()) await expect(header).toHaveCSS('background-color', colors[i]);
+    }
     await expect(monitor.locator('.paid[data-tier="unknown"] .paid-header').first()).toHaveCSS('background-color', 'rgb(220, 226, 233)');
+    await expect.soft(monitor.locator('.paid[data-tier="1"] .paid-body')).toHaveCSS('color', 'rgb(255, 255, 255)');
+    const expectUnifiedCards = async () => {
+      const cards = await monitor.locator('.paid-card').evaluateAll(cards => cards.map(card => {
+        const header = card.querySelector('.paid-header')!;
+        const body = card.querySelector('.paid-body');
+        const c = card.getBoundingClientRect(); const h = header.getBoundingClientRect();
+        const b = body?.getBoundingClientRect();
+        return {
+          backgrounds: [card, header, ...(body ? [body] : [])].map(element => getComputedStyle(element).backgroundColor),
+          headerBackground: getComputedStyle(header).backgroundColor,
+          joined: { headerTop: h.top, headerLeft: h.left, headerWidth: h.width,
+            bodyTop: b?.top, bodyLeft: b?.left, bodyWidth: b?.width, bodyBottom: b?.bottom },
+          expected: { headerTop: c.top, headerLeft: c.left, headerWidth: c.width,
+            bodyTop: b ? h.bottom : undefined, bodyLeft: b ? c.left : undefined,
+            bodyWidth: b ? c.width : undefined, bodyBottom: b ? c.bottom : undefined },
+        };
+      }));
+      for (const card of cards) {
+        expect.soft(card.backgrounds).toEqual(card.backgrounds.map(() => card.headerBackground));
+        expect.soft(card.joined).toEqual(card.expected);
+      }
+    };
     await expect(monitor.locator('#messages script, #messages img[src="x"]')).toHaveCount(0);
     for (const width of [360, 400, 480]) {
       await monitor.setViewportSize({ width, height: 800 });
+      await expectUnifiedCards();
       expect(await monitor.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       expect(await monitor.locator('.paid').evaluateAll(rows => rows.every(row => {
         const head = row.querySelector('.paid-header')!; const identity = row.querySelector('.paid-identity')!;
@@ -114,6 +140,7 @@ for (const locale of ['ja', 'en']) test(`実MV3 Super Chat ${locale}: 公式形�
     await monitor.keyboard.press('Escape');
     await expect(monitor.locator('.paid[data-tier="7"] .score-badge')).toHaveText('× 0.90');
     await expect(monitor.locator('.paid[data-tier="7"] .paid-header')).toHaveCSS('background-color', 'rgb(239, 83, 80)');
+    await expectUnifiedCards();
     await monitor.getByRole('button', { name: ja ? '取得を停止' : 'Stop collection', exact: true }).click();
     expect(requests).toEqual(['/youtube/v3/videos', '/youtube/v3/liveChat/messages']);
     await expect(watch.locator('body')).toHaveText('YouTube fixture');
