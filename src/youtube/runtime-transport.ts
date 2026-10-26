@@ -1,5 +1,5 @@
 import { runtime } from '../extension-runtime';
-import { failure, validDisplayName, validProfileImageUrl, type ChatPage, type Result } from './contracts';
+import { failure, parseSuperChat, validDisplayName, validProfileImageUrl, type ChatPage, type Result } from './contracts';
 import type { ChatTransport } from './monitor';
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -48,8 +48,9 @@ export function createRuntimeTransport(): ChatTransport {
       if (!result.ok) return result;
       if (!validPage(result.value)) return failure('invalidResponse');
       return { ok: true, value: { ...result.value, messages: result.value.messages.map(message => {
-        const { authorProfileImageUrl, ...rest } = message;
-        return { ...rest, ...(validProfileImageUrl(authorProfileImageUrl) ? { authorProfileImageUrl } : {}) };
+        const { authorProfileImageUrl, superChat, ...rest } = message;
+        return { ...rest, ...(message.type === 'superChatEvent' ? { superChat: parseSuperChat(superChat) } : {}),
+          ...(validProfileImageUrl(authorProfileImageUrl) ? { authorProfileImageUrl } : {}) };
       }) } };
     },
   };

@@ -1,6 +1,7 @@
 {
   "extensionDescription": { "message": "Collect and evaluate YouTube Live chat via the official API and manage per-broadcaster author lists locally. Does not modify YouTube UI." },
   "appName": { "message": "Agent Moderator" },
+  "superChat": { "message": "Super Chat" },
   "openSettings": { "message": "Open settings" },
   "popupNotice": { "message": "Collect and evaluate comments and save authors judged malicious to a local per-broadcaster list. YouTube pages and standard chat are not modified." },
   "popupPersistence": { "message": "Saved lists persist after stopping and can be managed on the extension's collection screen. Comments are hidden only in the independent viewer; YouTube is not changed." },

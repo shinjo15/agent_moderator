@@ -1,6 +1,7 @@
 {
   "extensionDescription": { "message": "YouTube Liveのコメントを公式APIで取得・評価し、配信者別の投稿者リストを端末内で管理します。YouTube画面は変更しません。" },
   "appName": { "message": "Agent Moderator" },
+  "superChat": { "message": "スーパーチャット" },
   "openSettings": { "message": "設定を開く" },
   "popupNotice": { "message": "コメントを取得・評価し、悪質と判定した投稿者を配信者別の端末内リストに保存します。YouTubeの画面や標準チャットは変更しません。" },
   "popupPersistence": { "message": "保存済みリストは停止後も残り、拡張の取得画面で解除できます。コメントの非表示は独立ビューアーだけに適用し、YouTubeは変更しません。" },

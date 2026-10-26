@@ -56,6 +56,39 @@ it('HTTP-dateのRetry-Afterを尊重し、不正な値は既定待機へ任せ�
 
 const message = { id: 'msg-1', snippet: { type: 'textMessageEvent', hasDisplayContent: true, displayMessage: 'こんにちは' }, authorDetails: { channelId: 'channel-1' } };
 const chatPage = { nextPageToken: 'next-1', pollingIntervalMillis: 8000, items: [message] };
+it('スーパーチャットは利用者向け金額と正値tierを保持し本文をuserCommentへ正規化する', async () => {
+  const fetcher = vi.fn(async () => new Response(JSON.stringify({ ...chatPage, items: [{ ...message,
+    snippet: { ...message.snippet, type: 'superChatEvent', displayMessage: 'Paid ￥1,000: 応援しています',
+      superChatDetails: { amountDisplayString: '￥1,000', currency: 'JPY', amountMicros: '1000000000', tier: 4, userComment: '応援しています\nありがとう' } },
+  }] })));
+  const result = await createYouTubeClient(fetcher).listMessages('chat', undefined, 'synthetic', new AbortController().signal);
+  expect(result).toMatchObject({ ok: true, value: { messages: [{ text: '応援しています\nありがとう', type: 'superChatEvent',
+    superChat: { amountDisplayString: '￥1,000', tier: 4 } }] } });
+  if (result.ok) expect(result.value.messages[0].superChat).toEqual({ amountDisplayString: '￥1,000', tier: 4 });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it.each([undefined, null, [], 'invalid', { amountDisplayString: 123, tier: '4', userComment: null },
+  { amountDisplayString: ' ', tier: -1 }, { amountDisplayString: '€12.34', tier: 99 },
+  { amountDisplayString: 'US$1,234,567,890.00', tier: 1.5 }, { currency: 'JPY', amountMicros: '1000000000', tier: 0 },
+])('公式スパチャ詳細 %j の不正/欠落は説明本文や金額から補完しない', async superChatDetails => {
+  const client = createYouTubeClient(vi.fn(async () => new Response(JSON.stringify({ ...chatPage, items: [{ ...message,
+    snippet: { type: 'superChatEvent', hasDisplayContent: true, displayMessage: 'Paid ￥1,000', superChatDetails },
+  }] }))));
+  const result = await client.listMessages('chat', undefined, 'synthetic', new AbortController().signal);
+  expect(result).toMatchObject({ ok: true, value: { messages: [{ text: '', type: 'superChatEvent' }] } });
+  if (result.ok) {
+    const data = superChatDetails as { amountDisplayString?: unknown } | undefined;
+    expect(result.value.messages[0].superChat).toEqual(typeof data?.amountDisplayString === 'string' && data.amountDisplayString.trim()
+      ? { amountDisplayString: data.amountDisplayString } : {});
+  }
+});
+it.each([1, 2, 3, 4, 5, 6, 7])('公式tier %i を表示金額と独立に保持する', async tier => {
+  const client = createYouTubeClient(vi.fn(async () => new Response(JSON.stringify({ ...chatPage, items: [{ ...message,
+    snippet: { type: 'superChatEvent', hasDisplayContent: true, superChatDetails: { tier, amountDisplayString: '$1.00', userComment: '' } },
+  }] }))));
+  expect(await client.listMessages('chat', undefined, 'synthetic', new AbortController().signal)).toMatchObject({ ok: true,
+    value: { messages: [{ text: '', superChat: { tier, amountDisplayString: '$1.00' } }] } });
+});
 it.each(['https://yt3.ggpht.com/channel=s88-c', 'https://yt3.googleusercontent.com/ytc/channel=s48-c'])('公式avatar %s を追加APIなし・キー付加なしで伝播する', async profileImageUrl => {
   const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...chatPage,
     items: [{ ...message, authorDetails: { ...message.authorDetails, profileImageUrl } }] })));

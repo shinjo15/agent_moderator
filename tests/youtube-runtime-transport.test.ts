@@ -4,6 +4,22 @@ vi.mock('../src/extension-runtime', () => ({ runtime: { sendMessage } }));
 import { createRuntimeTransport } from '../src/youtube/runtime-transport';
 const message = { id: 'post', text: 'こんにちは', type: 'textMessageEvent', authorChannelId: 'UCabcdefghijklmnopqrstuv' };
 const page = { messages: [message], nextPageToken: 'next', pollingIntervalMillis: 5000, ended: false };
+it.each([undefined, null, [], '4', { amountDisplayString: 100, tier: '4', currency: 'JPY' },
+  { amountDisplayString: '', tier: 0 }, { amountDisplayString: '￥999,999', tier: 99 },
+  { amountDisplayString: '$5.00', tier: 3 }, { amountDisplayString: '€2.00', tier: 1.5 },
+])('IPCスパチャ %j を既知表示fieldだけへ安全に検証する', async superChat => {
+  sendMessage.mockResolvedValueOnce({ ok: true, value: { ...page, messages: [{ ...message, type: 'superChatEvent', superChat }] } });
+  const result = await createRuntimeTransport().listMessages('chat', undefined, new AbortController().signal);
+  const data = superChat as { amountDisplayString?: unknown; tier?: unknown } | undefined;
+  expect(result).toEqual({ ok: true, value: { ...page, messages: [{ ...message, type: 'superChatEvent', superChat: {
+    ...(typeof data?.amountDisplayString === 'string' && data.amountDisplayString ? { amountDisplayString: data.amountDisplayString } : {}),
+    ...(data?.tier === 3 ? { tier: 3 } : {}),
+  } }] } });
+});
+it('通常eventへ注入されたスパチャmetadataは表示へ流さない', async () => {
+  sendMessage.mockResolvedValueOnce({ ok: true, value: { ...page, messages: [{ ...message, superChat: { tier: 7 } }] } });
+  expect(await createRuntimeTransport().listMessages('chat', undefined, new AbortController().signal)).toEqual({ ok: true, value: page });
+});
 it.each(['https://yt3.ggpht.com/channel=s88-c', 'https://yt3.googleusercontent.com/ytc/channel=s48-c'])('IPC avatar %s をそのまま伝播する', async authorProfileImageUrl => {
   const value = { ...page, messages: [{ ...message, authorProfileImageUrl }] };
   sendMessage.mockResolvedValueOnce({ ok: true, value });

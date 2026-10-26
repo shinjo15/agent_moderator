@@ -53,6 +53,27 @@
   .score-badge { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; border: 1px solid currentColor; border-radius: 5px; padding: 1px 4px; background: transparent; color: #64748b; font-family: Roboto, Arial, sans-serif; font-size: 11px; line-height: 18px; font-variant-numeric: tabular-nums; }
   .score-badge[data-state="good"] { color: #15803d; }
   .score-badge[data-state="bad"] { color: #b91c1c; }
+  .paid { display: block; padding: 6px 12px; }
+  .paid-card { border-radius: 8px; overflow: hidden; background: var(--paid-head, #dce2e9); color: #13212d; }
+  .paid-header { display: grid; grid-template-columns: 24px minmax(0, 1fr) 56px 16px; gap: 8px; align-items: start; padding: 10px; background: var(--paid-head, #dce2e9); }
+  .paid-header .chat-avatar { margin: 0; }
+  .paid-identity { min-width: 0; }
+  .paid-header .chat-author { display: block; margin: 0; color: inherit; line-height: 1.5; }
+  .paid-amount { display: block; font-weight: 600; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .paid-body { display: block; padding: 10px; background: var(--paid-head, #dce2e9); }
+  .paid .score-badge { width: 56px; }
+  .paid .message-details > summary { top: 14px; right: 17px; color: #263746; }
+  .paid[data-tier="1"] { --paid-head: #1565c0; --paid-body: #e3f2fd; }
+  .paid[data-tier="2"] { --paid-head: #00b8d4; --paid-body: #b2ebf2; }
+  .paid[data-tier="3"] { --paid-head: #00bfa5; --paid-body: #b9f6ca; }
+  .paid[data-tier="4"] { --paid-head: #ffca28; --paid-body: #fff9c4; }
+  .paid[data-tier="5"] { --paid-head: #ff9100; --paid-body: #ffe0b2; }
+  .paid[data-tier="6"] { --paid-head: #e750a0; --paid-body: #fce4ec; }
+  .paid[data-tier="7"] { --paid-head: #ef5350; --paid-body: #ffdad6; }
+  .paid[data-tier="1"] .paid-identity { color: white; }
+  .paid[data-tier="1"] .paid-body { color: white; }
+  .paid[data-tier="1"] .score-badge[data-state="good"] { color: #e0ffe4; }
+  .paid[data-tier="1"] .message-details > summary { color: white; }
   .score-details summary { cursor: pointer; }
   .score-details dl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; }
   .score-details dd { margin: 0; font-variant-numeric: tabular-nums; }

@@ -6,6 +6,30 @@ import { apiResponse, chatPost } from './fixtures/jev';
 const createModeration = (deps: Parameters<typeof createUnconfirmedModeration>[0]) =>
   createUnconfirmedModeration({ readConfirmation: async () => true, ...deps });
 
+it('本文なしスパチャはJev対象にも60秒文脈にも入れず連投の観測だけ維持する', async () => {
+  const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify(apiResponse())));
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic' });
+  await moderation.enable();
+  const paid = Array.from({ length: 10 }, (_, i) => ({ ...chatPost(`paid-${i}`, i * 1000),
+    type: 'superChatEvent', text: i % 2 ? '  \n' : '', superChat: { tier: 7, amountDisplayString: '￥10,000' } }));
+  const bursts = moderation.observe(paid.slice(0, 8));
+  expect(bursts).toEqual([]);
+  const blank = await moderation.evaluate('paid-0');
+  expect(blank).toMatchObject({ ok: true, value: { jev: 'unjudged' } });
+  if (blank.ok) { expect(blank.value.evaluation).toBeUndefined(); expect(blank.value.malicious).toBeUndefined(); }
+  expect(fetcher).not.toHaveBeenCalled();
+  // The same author's real comment cannot contain empty paid history or payment metadata.
+  moderation.observe([{ ...chatPost('body', 8500), type: 'superChatEvent', text: '実際の本文', superChat: { tier: 4, amountDisplayString: 'US$1,234.56' } }]);
+  expect(await moderation.evaluate('body')).toMatchObject({ ok: true, value: { jev: 'evaluated' } });
+  expect(JSON.parse(fetcher.mock.calls[0][1].body).state).toEqual({ target: { text: '実際の本文', publishedAt: chatPost('body', 8500).publishedAt }, history: [] });
+  expect(moderation.target('body')?.text).toBe('実際の本文');
+  // Eight empty payments, one real comment and the last empty payment count as ten.
+  expect(moderation.observe([paid[9]])).toHaveLength(1);
+  expect(await moderation.evaluate('paid-9')).toMatchObject({ ok: true, value: { burst: 'confirmed', malicious: true, jev: 'unjudged', reasons: ['burst'] } });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  moderation.reset();
+});
+
 it('Jevは未確認の有効化を拒否し送信直前の確認喪失でも待機分を送らない', async () => {
   const readConfirmation = vi.fn(async () => false);
   const fetcher = vi.fn(async () => new Response(JSON.stringify(apiResponse())));

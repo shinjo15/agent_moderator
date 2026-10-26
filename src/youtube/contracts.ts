@@ -30,7 +30,18 @@ export function validProfileImageUrl(value: unknown): value is string {
       && !url.username && !url.password && !url.port && !url.search && !url.hash;
   } catch { return false; }
 }
-export type ChatMessage = { id: string; text: string; authorChannelId: string; authorDisplayName?: string; authorProfileImageUrl?: string; type: string; publishedAt?: string };
+export type SuperChat = { amountDisplayString?: string; tier?: number };
+// Display-only metadata. Never infer a tier or reconstruct a price from currency/micros.
+export function parseSuperChat(value: unknown): SuperChat {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+  const data = value as Record<string, unknown>;
+  return {
+    ...(typeof data.amountDisplayString === 'string' && data.amountDisplayString.trim().length > 0
+      ? { amountDisplayString: data.amountDisplayString } : {}),
+    ...(typeof data.tier === 'number' && Number.isInteger(data.tier) && data.tier >= 1 && data.tier <= 7 ? { tier: data.tier } : {}),
+  };
+}
+export type ChatMessage = { id: string; text: string; authorChannelId: string; authorDisplayName?: string; authorProfileImageUrl?: string; type: string; publishedAt?: string; superChat?: SuperChat };
 export type ChatPage = {
   messages: ChatMessage[];
   nextPageToken: string;

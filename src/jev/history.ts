@@ -41,8 +41,9 @@ export function createHistory({ now = Date.now }: { now?: () => number } = {}) {
       if (!seen.set(message.id, message.authorChannelId)) return undefined;
       const time = publicationTime(message.publishedAt);
       const target = minimal(message);
+      const bodylessPayment = message.type === 'superChatEvent' && !message.text.trim();
       if (time === undefined) {
-        retain(message.authorChannelId, [...(authors.get(message.authorChannelId) ?? []).filter(entry => entry.time !== undefined),
+        if (!bodylessPayment) retain(message.authorChannelId, [...(authors.get(message.authorChannelId) ?? []).filter(entry => entry.time !== undefined),
           { id: message.id, author: message.authorChannelId, post: target }].slice(-20));
         return { state: { target, history: [] }, burst: 'unavailable' };
       }
@@ -60,7 +61,7 @@ export function createHistory({ now = Date.now }: { now?: () => number } = {}) {
       const timestamps = times.get(message.authorChannelId) ?? [];
       const count = timestamps.filter(entry => entry.time <= time && time - entry.time <= 10000000000n).length + 1;
       times.set(message.authorChannelId, [...timestamps, { id: message.id, time }]);
-      retain(message.authorChannelId, [...retained, { id: message.id, author: message.authorChannelId, post: target, time }].sort((a, b) => a.time! < b.time! ? -1 : a.time! > b.time! ? 1 : 0).slice(-20));
+      if (!bodylessPayment) retain(message.authorChannelId, [...retained, { id: message.id, author: message.authorChannelId, post: target, time }].sort((a, b) => a.time! < b.time! ? -1 : a.time! > b.time! ? 1 : 0).slice(-20));
       return { state: { target, history: previous.slice(-19).map(entry => entry.post) },
         burst: count >= 10 ? 'confirmed' : 'notObserved' };
     },
