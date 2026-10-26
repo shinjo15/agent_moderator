@@ -106,7 +106,8 @@ test('MV3 names: 公式応答fixture→判定→名前永続→browser再起動�
     await monitor.getByRole('button', { name: '取得を停止', exact: true }).click();
     expect(jevCalls).toBe(3); expect(requests.filter(p => p.endsWith('/videos'))).toHaveLength(1);
     const persisted = await worker.evaluate(async key => (await chrome.storage.local.get([key]))[key], key);
-    expect(persisted).toEqual({ ids: [a, c], revisions: { [legacy]: 1 }, displayNames: { [a]: 'みどりの庭', [c]: longName }, migratedVideos: [video] });
+    expect(persisted).toEqual({ ids: [a, c], revisions: { [legacy]: 1 }, displayNames: { [a]: 'みどりの庭', [c]: longName }, migratedVideos: [video],
+      triggerComments: { [a]: { text: '宣伝を繰り返す', videoId: video }, [c]: { text: '攻撃的なコメント', videoId: video } } });
     expect(JSON.stringify(await worker.evaluate(() => chrome.storage.local.get(null)))).not.toContain('yt3.');
     await context.close(); context = await launch();
     const restarted = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
@@ -115,6 +116,7 @@ test('MV3 names: 公式応答fixture→判定→名前永続→browser再起動�
     let restartCalls = 0; await context.route('https://www.googleapis.com/**', route => { restartCalls++; return route.abort(); });
     const reopened = await openMonitor(context, new URL(restarted.url()).hostname);
     await expect(reopened.monitor.locator('#hidden-authors .author-name')).toHaveText(['みどりの庭', longName]);
+    await expect(reopened.monitor.locator('#hidden-authors .hidden-trigger-text')).toHaveText(['宣伝を繰り返す', '攻撃的なコメント']);
     await expect(reopened.monitor.locator('#messages li')).toHaveCount(0);
     const restartedFrame = reopened.watch.frames().find(f => f.url().includes('/live_chat'))!;
     await expect(restartedFrame.locator('#a')).toBeVisible(); await expect(restartedFrame.locator('#b')).toBeVisible();

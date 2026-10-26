@@ -1,6 +1,6 @@
-import { validAuthor, type HiddenAuthor } from './store';
+import { validAuthor, validTriggerComment, type HiddenAuthor } from './store';
 import { validDisplayName } from '../youtube/contracts';
-export type HiddenSnapshot = { status: 'loading' | 'ready' | 'error'; authors: HiddenAuthor[] };
+export type HiddenSnapshot = { status: 'unavailable' | 'loading' | 'ready' | 'error'; authors: HiddenAuthor[] };
 // Only a current, validated storage read can authorize showing a comment. Evaluation
 // responses are deliberately not an input: removals carry their own store revision.
 export function createHiddenAuthorSnapshot({ read, changed }: {
@@ -9,12 +9,12 @@ export function createHiddenAuthorSnapshot({ read, changed }: {
   let video: string | undefined;
   let generation = 0;
   let reading: number | undefined;
-  let state: HiddenSnapshot = { status: 'loading', authors: [] };
+  let state: HiddenSnapshot = { status: 'unavailable', authors: [] };
   const publish = (next: HiddenSnapshot) => { state = next; changed(next); };
   async function refresh(block = state.status !== 'ready') {
     const selected = video; const current = ++generation;
+    if (!selected) { publish({ status: 'unavailable', authors: [] }); return; }
     if (block) publish({ ...state, status: 'loading' });
-    if (!selected) return;
     reading = current;
     try {
       const value = await read(selected) as { ok?: boolean; code?: unknown; videoId?: unknown; ids?: unknown; authors?: unknown };
@@ -22,14 +22,17 @@ export function createHiddenAuthorSnapshot({ read, changed }: {
       if (value?.ok === false && value.code === 'scopeUnresolved') { publish({ status: 'loading', authors: [] }); return; }
       if (value?.ok !== true || value.videoId !== selected || !Array.isArray(value.ids) || !value.ids.every(validAuthor)) throw new Error('Invalid snapshot');
       const ids: string[] = value.ids;
+      if (new Set(ids).size !== ids.length) throw new Error('Duplicate authors');
       const authors: HiddenAuthor[] = ids.map(authorChannelId => ({ authorChannelId }));
       if (value.authors !== undefined) {
         if (!Array.isArray(value.authors) || value.authors.length !== ids.length) throw new Error('Invalid authors');
         for (let i = 0; i < authors.length; i++) {
           const author = value.authors[i] as HiddenAuthor | null;
           if (!author || typeof author !== 'object' || Array.isArray(author) || author.authorChannelId !== ids[i]
-            || (author.displayName !== undefined && !validDisplayName(author.displayName))) throw new Error('Invalid author');
+            || (author.displayName !== undefined && !validDisplayName(author.displayName))
+            || (author.triggerComment !== undefined && !validTriggerComment(author.triggerComment))) throw new Error('Invalid author');
           if (author.displayName !== undefined) authors[i].displayName = author.displayName;
+          if (author.triggerComment !== undefined) authors[i].triggerComment = { text: author.triggerComment.text, videoId: author.triggerComment.videoId };
         }
       }
       publish({ status: 'ready', authors });

@@ -288,16 +288,19 @@ export function createYouTubeHandler({ session, tabs, windows, runtime, client, 
         if (message.type === 'jev.enable' && count === 1) result = await moderation.enable();
         else if (message.type === 'jev.evaluate' && count === 2 && text(message.id)) {
           const observed = observations.get(message.id);
+          const target = moderation.target(message.id);
           const evaluated = await moderation.evaluate(message.id);
           result = evaluated;
-          if (hiddenAuthors && evaluated.ok && evaluated.value.malicious === true && observed && observed.video === selected.videoId
+          if (hiddenAuthors && target && moderation.target(message.id) === target && evaluated.ok && evaluated.value.malicious === true && observed && observed.video === selected.videoId
             && observations.get(message.id) === observed && observed.author === evaluated.value.authorChannelId && observed.generation === collection) {
             await stateExclusive(async () => {
+              if (!await readConfirmation()) return;
               if (!currentEpoch() || selectedGeneration !== bindingGeneration || collection !== collectionGeneration
                 || videoIdFromUrl((await tabs.get(selected.targetTabId)).url) !== selected.videoId) return;
               await hiddenAuthors.add(observed.channel, observed.author, observed.revision,
-                () => currentEpoch() && selectedGeneration === bindingGeneration && collection === collectionGeneration && observations.get(message.id as string) === observed,
-                latestDisplayName(observed));
+                () => currentEpoch() && selectedGeneration === bindingGeneration && collection === collectionGeneration && observations.get(message.id as string) === observed
+                  && moderation.target(message.id as string) === target,
+                latestDisplayName(observed), { text: target.text, videoId: observed.video });
             });
           }
         }
@@ -439,9 +442,10 @@ export function createYouTubeHandler({ session, tabs, windows, runtime, client, 
               const bursts = moderation?.observe(result.value.messages) ?? [];
               if (hiddenAuthors) for (const post of bursts) {
                 const observed = observations.get(post.id);
+                if (!await readConfirmation()) return failure('confirmationRequired');
                 if (observed) await hiddenAuthors.add(observed.channel, observed.author, observed.revision,
                   () => currentEpoch() && !controller.signal.aborted && selectedGeneration === bindingGeneration && collection === collectionGeneration && observations.get(post.id) === observed,
-                  latestDisplayName(observed));
+                  latestDisplayName(observed), { text: post.text, videoId: observed.video });
               }
             }
             return result;

@@ -60,7 +60,7 @@ test('MV3 background: 旧runtime/旧版/読取・保存失敗は通信0、Jev有
     }, target.id);
     const monitor = await monitorOpened; await monitor.goto(`chrome-extension://${id}/monitor.html`);
     await expect(monitor.getByRole('button', { name: '取得を開始', exact: true })).toBeEnabled();
-    for (const value of [undefined, { version: 2 }, { version: 1 }, { version: 0 }, { version: '3' }]) {
+    for (const value of [undefined, { version: 3 }, { version: 2 }, { version: 1 }, { version: 0 }, { version: '4' }]) {
       if (value !== undefined) {
         await monitor.evaluate(() => {
           const send = chrome.runtime.sendMessage.bind(chrome.runtime);

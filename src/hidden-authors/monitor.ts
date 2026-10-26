@@ -30,9 +30,19 @@ export function createHiddenAuthorPanel(main: HTMLElement, transport: Pick<typeo
       empty.hidden = authors.length > 0;
       status.textContent = t('hiddenCount', authors.length);
       if (signature === next) return; signature = next; list.replaceChildren();
-      for (const { authorChannelId: author, displayName } of authors) {
+      for (const { authorChannelId: author, displayName, triggerComment } of authors) {
         const item = document.createElement('li');
-        const label = createAuthorLabel(author, displayName); label.classList.add('hidden-author-label'); item.append(label);
+        const content = document.createElement('div'); content.className = 'hidden-author-label';
+        const label = createAuthorLabel(author, displayName); content.append(label);
+        const evidence = document.createElement('div'); evidence.className = 'hidden-trigger-comment';
+        const caption = document.createElement('span');
+        caption.textContent = t(triggerComment === undefined ? 'hiddenTriggerUnknown' : 'hiddenTriggerLabel'); evidence.append(caption);
+        if (triggerComment !== undefined) {
+          const text = document.createElement('p'); text.className = 'hidden-trigger-text'; text.textContent = triggerComment.text;
+          evidence.append(text);
+          if (triggerComment.text === '') { const emptyText = document.createElement('span'); emptyText.textContent = t('hiddenTriggerEmpty'); evidence.append(emptyText); }
+        }
+        content.append(evidence); item.append(content);
         const remove = document.createElement('button'); remove.textContent = t('unhide');
         remove.setAttribute('aria-label', t('unhideAria', displayAuthorName(displayName), author));
         remove.type = 'button';

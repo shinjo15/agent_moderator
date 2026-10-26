@@ -127,7 +127,15 @@ function renderMessages() {
   restorePosition();
   if (visible.length) rememberPosition();
 }
+const hiddenButton = document.createElement('button'); hiddenButton.type = 'button'; hiddenButton.append(t('openHidden'));
+const hiddenBadge = document.createElement('span'); hiddenBadge.className = 'hidden-count-badge'; hiddenBadge.setAttribute('aria-hidden', 'true'); hiddenBadge.textContent = '—';
+const hiddenDescription = document.createElement('span'); hiddenDescription.id = 'hidden-count-description'; hiddenDescription.hidden = true; hiddenDescription.textContent = t('selectStream');
+hiddenButton.setAttribute('aria-describedby', hiddenDescription.id); hiddenButton.append(hiddenBadge, hiddenDescription);
 const hidden = createHiddenAuthorPanel(main, runtime, () => {
+  const state = hidden.state();
+  hiddenBadge.textContent = state.status === 'ready' ? String(state.authors.length) : state.status === 'error' ? '!' : state.status === 'loading' ? '…' : '—';
+  hiddenDescription.textContent = state.status === 'ready' ? t('hiddenCount', state.authors.length)
+    : t(state.status === 'error' ? 'hiddenListFailure' : state.status === 'loading' ? 'checkingList' : 'selectStream');
   if (hidden.state().status === 'ready') for (const row of retained) row.admitted = true;
   renderMessages();
 });
@@ -144,7 +152,6 @@ function panel(title: string, className: string) {
 }
 const hiddenDialog = panel(t('hiddenTitle'), 'hidden-dialog');
 hiddenDialog.append(main.querySelector('.hidden-author-panel')!);
-const hiddenButton = document.createElement('button'); hiddenButton.type = 'button'; hiddenButton.textContent = t('openHidden');
 hiddenButton.addEventListener('click', () => hiddenDialog.showModal());
 const settingsDialog = panel(t('settingsTitle'), 'settings-dialog');
 settings.addEventListener('click', () => {
