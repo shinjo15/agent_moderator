@@ -11,8 +11,13 @@ export const definitions = {
 export type Category = keyof typeof definitions;
 export const categories = Object.keys(definitions) as Category[];
 export type Values = Record<Category, number>;
-export function decide(values: Values, threshold = DEFAULT_THRESHOLD) {
-  if (!validThreshold(threshold)) throw new RangeError('Invalid moderation threshold');
-  const reasons = categories.filter(key => values[key] >= threshold);
+export function validThresholds(value: unknown): value is Values {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return Object.keys(record).length === categories.length && categories.every(key => validThreshold(record[key]));
+}
+export function decide(values: Values, threshold: number | Values = DEFAULT_THRESHOLD) {
+  if (!validThreshold(threshold) && !validThresholds(threshold)) throw new RangeError('Invalid moderation threshold');
+  const reasons = categories.filter(key => values[key] >= (typeof threshold === 'number' ? threshold : threshold[key]));
   return { malicious: reasons.length > 0, reasons };
 }

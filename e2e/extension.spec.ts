@@ -149,6 +149,7 @@ test('実際のMV3拡張を読み込み、設定buttonから同じpageで設定�
           .some(element => element.scrollWidth > element.clientWidth),
         inputOverflows: [...document.querySelectorAll('input')].some(input => {
           const rect = input.getBoundingClientRect();
+          if (rect.width === 0 && rect.height === 0) return false;
           return rect.left < content.left || rect.right > content.right;
         }),
       };
@@ -161,6 +162,15 @@ test('実際のMV3拡張を読み込み、設定buttonから同じpageで設定�
       contentOverflows: false,
       inputOverflows: false,
     });
+    await page.getByLabel('フィルターの強さ', { exact: true }).selectOption('custom');
+    await page.getByLabel('個別（7項目）').check();
+    expect(await page.locator('.category-row input').count()).toBe(7);
+    expect(await page.evaluate(() => {
+      const content = document.querySelector('main')!.getBoundingClientRect();
+      return [...document.querySelectorAll<HTMLElement>('.category-row input')].every(input => {
+        const rect = input.getBoundingClientRect(); return rect.width > 0 && rect.left >= content.left && rect.right <= content.right;
+      });
+    })).toBe(true);
     await expect(page.getByTestId('youtube-status')).toHaveText('未設定：設定が必要です。');
     await page.getByLabel('Jev APIキー').fill('synthetic-jev');
     await page.getByLabel('YouTube APIキー').fill('synthetic-youtube');

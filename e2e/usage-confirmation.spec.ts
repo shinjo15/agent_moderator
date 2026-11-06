@@ -31,9 +31,9 @@ test('MV3利用条件: 掲載案リンク・明示確認・複数設定画面・
     await options.getByRole('button', { name: 'YouTubeキーを保存', exact: true }).click();
     await expect(options.getByTestId('youtube-status')).toHaveText('設定済み');
     await options.getByLabel('フィルターの強さ', { exact: true }).selectOption('custom');
-    await options.getByLabel('判定の基準値', { exact: true }).fill('0.731');
+    await options.getByLabel('7項目共通の判定の基準値', { exact: true }).fill('0.731');
     await options.getByRole('button', { name: 'フィルター設定を保存', exact: true }).click();
-    await expect(options.getByTestId('filter-status')).toContainText('判定の基準値 0.731');
+    await expect(options.getByTestId('filter-status')).toContainText('カスタム（一括 / 共通 0.731）');
     const second = await context.newPage(); await second.goto(options.url());
     await options.getByLabel('利用規約（案）とプライバシーポリシー（案）に同意し、データ送信・費用の説明を確認しました', { exact: true }).check();
     await confirm.click();
@@ -48,7 +48,7 @@ test('MV3利用条件: 掲載案リンク・明示確認・複数設定画面・
     options = await context.newPage(); await options.goto(`chrome-extension://${id}/options.html`);
     await expect(options.getByTestId('confirmation-status')).toContainText('同意済み');
     await expect(options.getByTestId('youtube-status')).toHaveText('設定済み');
-    await expect(options.getByTestId('filter-status')).toContainText('判定の基準値 0.731');
+    await expect(options.getByTestId('filter-status')).toContainText('カスタム（一括 / 共通 0.731）');
     await options.getByRole('button', { name: 'YouTubeキーを削除', exact: true }).click();
     await expect(options.getByTestId('youtube-status')).toContainText('未設定');
     expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'confirmation.get' }))).toMatchObject({ ok: true, value: { confirmed: true } });

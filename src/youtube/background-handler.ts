@@ -254,6 +254,9 @@ export function createYouTubeHandler({ session, tabs, windows, runtime, client, 
       }
       if (changingTarget && (collects || message.type === 'youtube.status')) return targetPending();
       if (selectedGeneration !== bindingGeneration || staleCollection()) return failure('aborted');
+      if (message.type === 'jev.capabilities' && Object.keys(message).length === 1) {
+        return { ok: true, value: { thresholdFormat: 2 } };
+      }
       activeBinding = { generation: selectedGeneration, binding: selected };
       if (message.type === 'youtube.cancel') {
         if (!text(message.requestId)) return failure('invalidInput');
@@ -286,10 +289,11 @@ export function createYouTubeHandler({ session, tabs, windows, runtime, client, 
         let result: unknown;
         const collection = selectedCollection;
         if (message.type === 'jev.enable' && count === 1) result = await moderation.enable();
-        else if (message.type === 'jev.evaluate' && count === 2 && text(message.id)) {
+        else if (message.type === 'jev.evaluate' && text(message.id)
+          && (count === 2 || (count === 3 && message.thresholdFormat === 2))) {
           const observed = observations.get(message.id);
           const target = moderation.target(message.id);
-          const evaluated = await moderation.evaluate(message.id);
+          const evaluated = await moderation.evaluate(message.id, message.thresholdFormat === 2);
           result = evaluated;
           if (hiddenAuthors && target && moderation.target(message.id) === target && evaluated.ok && evaluated.value.malicious === true && observed && observed.video === selected.videoId
             && observations.get(message.id) === observed && observed.author === evaluated.value.authorChannelId && observed.generation === collection) {

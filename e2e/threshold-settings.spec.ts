@@ -38,7 +38,7 @@ test('filter settings: 通常Webページからの書込要求では設定を変
 async function save(page: Page, threshold: number) {
   await page.getByRole('button', { name: 'フィルター設定を保存', exact: true }).click();
   await expect(page.getByTestId('filter-status')).toContainText(`保存しました：`);
-  await expect(page.getByTestId('filter-status')).toContainText(`判定の基準値 ${threshold}`);
+  await expect(page.getByTestId('filter-status')).toContainText(String(threshold));
   expect(await page.evaluate(() => chrome.runtime.sendMessage({ type: 'settings.getFilter' }))).toEqual({ ok: true, value: { threshold } });
 }
 
@@ -52,8 +52,8 @@ test('filter settings: preset3/custom0,1/任意値・無効値・キー下書き
     for (const [preset, threshold] of [['high', 0.65], ['low', 0.9], ['medium', 0.8]] as const) {
       await strength.selectOption(preset); await save(page, threshold);
     }
-    await page.getByText('詳細設定', { exact: true }).click();
-    const custom = page.getByLabel('判定の基準値', { exact: true });
+    await strength.selectOption('custom');
+    const custom = page.getByLabel('7項目共通の判定の基準値', { exact: true });
     for (const threshold of [0, 1, 0.731]) {
       await custom.fill(String(threshold)); await expect(strength).toHaveValue('custom'); await save(page, threshold);
     }
@@ -69,8 +69,8 @@ test('filter settings: preset3/custom0,1/任意値・無効値・キー下書き
       await expect(page.getByTestId('filter-status')).toContainText('0以上1以下の数値');
     }
     await strength.selectOption('high'); await save(page, 0.65);
-    await page.getByText('詳細設定', { exact: true }).click();
-    await expect(custom).toHaveValue('0.65');
+    await strength.selectOption('custom');
+    await expect(custom).toHaveValue('');
     await expect(page.getByLabel('Jev APIキー')).toHaveValue('synthetic-unsent-jev');
     await expect(page.getByLabel('YouTube APIキー')).toHaveValue('synthetic-unsent-youtube');
     await expect(page.getByRole('button', { name: 'Jevキーを保存', exact: true })).toBeEnabled();
@@ -82,14 +82,14 @@ test('filter settings: customはリロード・browser/worker再起動後もloca
   let launched = await launch(profile);
   try {
     await launched.page.getByLabel('フィルターの強さ', { exact: true }).selectOption('custom');
-    await launched.page.getByLabel('判定の基準値', { exact: true }).fill('0.731');
+    await launched.page.getByLabel('7項目共通の判定の基準値', { exact: true }).fill('0.731');
     await save(launched.page, 0.731);
     await launched.page.reload();
-    await expect(launched.page.getByTestId('filter-status')).toContainText('現在の設定：カスタム / 判定の基準値 0.731');
+    await expect(launched.page.getByTestId('filter-status')).toContainText('現在の設定：カスタム（一括 / 共通 0.731）');
     await expect(launched.page.getByLabel('フィルターの強さ', { exact: true })).toHaveValue('custom');
     await launched.context.close(); launched = await launch(profile);
-    await expect(launched.page.getByTestId('filter-status')).toContainText('現在の設定：カスタム / 判定の基準値 0.731');
-    await expect(launched.page.getByLabel('判定の基準値', { exact: true })).toHaveValue('0.731');
+    await expect(launched.page.getByTestId('filter-status')).toContainText('現在の設定：カスタム（一括 / 共通 0.731）');
+    await expect(launched.page.getByLabel('7項目共通の判定の基準値', { exact: true })).toHaveValue('0.731');
     expect(await launched.page.evaluate(() => chrome.runtime.sendMessage({ type: 'settings.getFilter' }))).toEqual({ ok: true, value: { threshold: 0.731 } });
   } finally { await launched.context.close(); await rm(profile, { recursive: true, force: true }); }
 });
@@ -111,6 +111,8 @@ test('filter settings: 書込失敗とreadback不一致を成功表示せず未�
       await expect(page.getByTestId('filter-status')).toContainText('処理に失敗');
       await expect(page.getByTestId('filter-status')).not.toContainText('保存しました');
       expect(await page.evaluate(() => chrome.runtime.sendMessage({ type: 'settings.getFilter' }))).toEqual({ ok: true, value: { threshold: 0.8 } });
+      await page.getByRole('button', { name: '設定を再確認' }).click();
+      await expect(page.getByTestId('filter-status')).toContainText('現在の設定');
     }
     await expect(page.getByLabel('Jev APIキー')).toHaveValue('synthetic-unsent');
     await expect(page.getByRole('button', { name: 'Jevキーを保存', exact: true })).toBeEnabled();

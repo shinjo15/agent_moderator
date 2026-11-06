@@ -3,6 +3,7 @@ import { createYouTubeHandler } from '../src/youtube/background-handler';
 import { failure, type ChatMessage } from '../src/youtube/contracts';
 import { createChatMonitor } from '../src/youtube/monitor';
 import { createModeration as createUnconfirmedModeration } from '../src/jev/moderation';
+import { createModerationTransport } from '../src/jev/runtime-transport';
 import { createJevClient } from './fixtures/jev-client';
 import { apiResponse, chatPost } from './fixtures/jev';
 import { createHiddenAuthors } from '../src/hidden-authors/store';
@@ -38,6 +39,62 @@ function setup() {
 const popup = { id: 'test', url: 'chrome-extension://test/popup.html' };
 const monitor = { id: 'test', url: 'chrome-extension://test/monitor.html', tab: { id: 10 } };
 const open = { type: 'youtube.openMonitor', tabId: 9, videoId: 'abcdefghijk' };
+
+it('capability照会は紐付いたmonitor以外を拒否し副作用を起こさない', async () => {
+  const { handler, deps } = setup(); await handler.handle(open, popup);
+  const probe = { type: 'jev.capabilities' };
+  for (const sender of [popup, { ...monitor, id: 'other' }, { ...monitor, url: `${monitor.url}?x=1` }, { ...monitor, tab: { id: 11 } }])
+    expect(await handler.handle(probe, sender)).toMatchObject({ ok: false });
+  expect(await handler.handle(probe, monitor)).toEqual({ ok: true, value: { thresholdFormat: 2 } });
+  expect(await handler.handle({ ...probe, extra: true }, monitor)).toMatchObject({ ok: false });
+  expect(deps.client.listMessages).not.toHaveBeenCalled(); expect(deps.client.resolveVideo).not.toHaveBeenCalled();
+});
+
+it('nav通知前にURLだけ変化した評価要求は更新案内にせず、Jev送信せず新対象へ追従できる', async () => {
+  const { deps, advance } = setup();
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(apiResponse({ attack: 0.7 }))));
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic' });
+  const handler = createYouTubeHandler({ ...deps, moderation });
+  await handler.handle(open, popup); await handler.handle({ type: 'jev.enable' }, monitor);
+  await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'resolve' }, monitor);
+  advance(8000); deps.client.listMessages.mockResolvedValue({ ok: true, value: { messages: [chatPost('old')], nextPageToken: 'next', pollingIntervalMillis: 8000, ended: false } });
+  await handler.handle({ type: 'youtube.list', liveChatId: 'chat-1', requestId: 'list' }, monitor);
+  deps.tabs.get.mockImplementation(async id => ({ id, url: id === 9 ? 'https://www.youtube.com/watch?v=zyxwvutsrqp' : monitor.url }));
+  const sendMessage = vi.fn(async (message: unknown) => handler.handle(message, monitor));
+  expect(await createModerationTransport({ sendMessage }).evaluate('old', chatPost('old').authorChannelId)).toBeUndefined();
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(sendMessage.mock.calls.map(([message]) => (message as { type: string }).type)).toEqual(['jev.evaluate', 'jev.capabilities']);
+  await handler.targetChanged(9, 'https://www.youtube.com/watch?v=zyxwvutsrqp');
+  advance(8000);
+  expect(await handler.handle({ type: 'youtube.resolve', videoId: 'zyxwvutsrqp', requestId: 'new' }, monitor)).toMatchObject({ ok: true });
+  advance(8000); deps.client.listMessages.mockResolvedValue({ ok: true, value: { messages: [chatPost('new')], nextPageToken: 'next', pollingIntervalMillis: 8000, ended: false } });
+  expect(await handler.handle({ type: 'youtube.list', liveChatId: 'chat-1', requestId: 'new-list' }, monitor)).toMatchObject({ ok: true });
+  expect(await createModerationTransport({ sendMessage }).evaluate('new', chatPost('new').authorChannelId)).toMatchObject({ jev: 'evaluated', malicious: false });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  moderation.reset();
+});
+
+it('旧monitorの個別閾値結果は非表示にせず、新形式対応monitorだけに結果と非表示を許可する', async () => {
+  const { deps, advance } = setup(); const channel = 'UC0000000000000000000000';
+  const author = 'UCabcdefghijklmnopqrstuv';
+  const hiddenAuthors = createHiddenAuthors({ storage: deps.session, initialize: deps.initialize });
+  const thresholds = { attack: 0.4, hate: 0.9, threat: 0.9, sexualHarassment: 0.9, doxxing: 0.9, spam: 0.9, unrelatedPromotion: 0.9 };
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(apiResponse({ attack: 0.7 }))));
+  const moderation = createModeration({ client: createJevClient(fetcher),
+    readKey: async () => 'synthetic', readThreshold: async () => thresholds });
+  const handler = createYouTubeHandler({ ...deps, hiddenAuthors, moderation });
+  await handler.handle(open, popup); await handler.handle({ type: 'jev.enable' }, monitor);
+  await handler.handle({ type: 'youtube.resolve', videoId: open.videoId, requestId: 'resolve' }, monitor);
+  advance(8000); deps.client.listMessages.mockResolvedValue({ ok: true, value: { messages: [{ ...chatPost('mixed'), authorChannelId: author }, { ...chatPost('later', 1000), authorChannelId: author }], nextPageToken: 'next', pollingIntervalMillis: 8000, ended: false } });
+  await handler.handle({ type: 'youtube.list', liveChatId: 'chat-1', requestId: 'list' }, monitor);
+  expect(await handler.handle({ type: 'jev.evaluate', id: 'mixed' }, monitor)).toMatchObject({ ok: true, value: { jev: 'failed', error: { code: 'invalidResponse' } } });
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(await handler.handle({ type: 'jev.evaluate', id: 'later' }, monitor)).toMatchObject({ ok: true, value: { jev: 'failed' } });
+  expect(fetcher).not.toHaveBeenCalled();
+  expect(await hiddenAuthors.listAuthors(channel)).toEqual([]);
+  expect(await handler.handle({ type: 'jev.evaluate', id: 'mixed', thresholdFormat: 2 }, monitor)).toMatchObject({ ok: true, value: { malicious: true, threshold: thresholds } });
+  expect(fetcher).toHaveBeenCalledTimes(1); expect(await hiddenAuthors.listAuthors(channel)).toHaveLength(1); moderation.reset();
+});
 
 it('AIの根拠は最初のbackground対象本文へ拘束し、同ID再取得・同名別ID・後続・cached評価で差し替えない', async () => {
   const { deps, advance } = setup(); const channel = 'UC0000000000000000000000';

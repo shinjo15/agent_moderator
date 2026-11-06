@@ -17,9 +17,10 @@ for (const fault of ['initialize', 'read', 'write', 'readback', 'missingReadback
     const message = ['read', 'invalidStored'].includes(fault) ? { type: 'settings.getFilter' }
       : { type: 'settings.saveFilter', threshold: fault === 'invalidInput' ? 'synthetic-private' : 0.8 };
     if (fault === 'initialize') initialize.mockRejectedValueOnce(new Error('synthetic-private'));
-    if (fault === 'read' || fault === 'readback') storage.get.mockRejectedValueOnce(new Error('synthetic-private'));
+    if (fault === 'read') storage.get.mockRejectedValueOnce(new Error('synthetic-private'));
+    if (fault === 'readback') storage.get.mockResolvedValueOnce({ ...data }).mockRejectedValueOnce(new Error('synthetic-private'));
     if (fault === 'write') storage.set.mockRejectedValueOnce(new Error('synthetic-private'));
-    if (fault === 'missingReadback') storage.get.mockResolvedValueOnce({});
+    if (fault === 'missingReadback') storage.get.mockResolvedValueOnce({ ...data }).mockResolvedValueOnce({});
     if (fault === 'invalidStored') data['moderation.threshold'] = 'synthetic-private';
     const response = await handler.handle(message, fault === 'authorization' ? { ...sender, url: sender.url + '?forged=1' } : sender);
     expect(response).toMatchObject({ ok: false, code: fault === 'missingReadback' ? 'readback' : fault });

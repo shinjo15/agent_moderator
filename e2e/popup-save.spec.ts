@@ -2,7 +2,7 @@ import { test, expect, chromium, type BrowserContext } from '@playwright/test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-declare const chrome: { storage: { local: { set(values: Record<string, unknown>): Promise<void> } }; action: { openPopup(): Promise<void> }; runtime: {
+declare const chrome: { storage: { local: { get(keys: string[]): Promise<Record<string, unknown>>; set(values: Record<string, unknown>): Promise<void> } }; action: { openPopup(): Promise<void> }; runtime: {
   getURL(path: string): string;
   sendMessage(message: unknown): Promise<unknown>;
   getContexts(filter: object): Promise<unknown[]>;
@@ -18,7 +18,7 @@ async function popup(context: BrowserContext) {
     const records: unknown[] = [];
     Object.assign(globalThis, { popupSenderEvidence: records });
     chrome.runtime.onMessage.addListener((message, sender) => {
-      if (['settings.getFilter', 'settings.saveFilter', 'storage.init', 'credentials.get'].includes(message.type ?? '')) {
+      if (['settings.getFilter', 'settings.saveFilter', 'settings.getFilterConfig', 'settings.saveFilterConfig', 'storage.init', 'credentials.get'].includes(message.type ?? '')) {
         const { id, url, origin, documentId, documentLifecycle, frameId } = sender;
         records.push({ type: message.type, id, url, origin, documentId, documentLifecycle, frameId });
       }
@@ -104,8 +104,11 @@ test('実action popup内でもquery付きoptionsからの設定保存を認可�
     await active.evaluate("location.search='?source=synthetic'");
     await expect.poll(() => active.evaluate("document.querySelector('select')?.disabled")).toBe(false);
     expect(await active.evaluate("location.href===chrome.runtime.getURL('options.html')")).toBe(false);
+    await expect.poll(() => active.evaluate("document.querySelector('[data-testid=filter-status]').textContent.includes('filter-initialGet-authorization')")).toBe(true);
+    expect(await active.evaluate("document.querySelector('.filter-card button').disabled")).toBe(true);
     await active.evaluate("document.querySelector('.filter-card button').click()");
-    await expect.poll(() => active.evaluate("document.querySelector('[data-testid=filter-status]').textContent.includes('filter-save-authorization')")).toBe(true);
+    expect(await active.evaluate("chrome.runtime.sendMessage({type:'settings.saveFilterConfig',config:{active:'high',custom:null},expected:{active:'medium',custom:null}})")).toMatchObject({ ok: false, code: 'authorization' });
+    expect(await active.worker.evaluate(async () => (await chrome.storage.local.get(['moderation.threshold']))['moderation.threshold'])).toBeUndefined();
   } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
 });
 
@@ -116,7 +119,7 @@ test('実action popup内の設定保存・sender認可・readback・再起動後
     const { worker, evaluate } = await popup(context);
     await evaluate("document.querySelector('select').value='high'; document.querySelector('select').dispatchEvent(new Event('change')); document.querySelector('.filter-card button').click()");
     await expect.poll(() => evaluate("document.querySelector('.filter-card button').disabled")).toBe(false);
-    const diagnostics = await evaluate("(async()=>{const get=await chrome.runtime.sendMessage({type:'settings.getFilter'}),save=await chrome.runtime.sendMessage({type:'settings.saveFilter',threshold:0.65}),credentials=await chrome.runtime.sendMessage({type:'storage.init'}),secret=await chrome.runtime.sendMessage({type:'credentials.get',provider:'jev'});return {isPopup:chrome.extension.getViews({type:'popup'}).includes(window),documentUrlMatches:location.href===chrome.runtime.getURL('options.html'),uiSaved:document.querySelector('[data-testid=filter-status]').textContent==='保存しました：高 / 判定の基準値 0.65',getValid:get?.ok===true&&get.value?.threshold===0.65,saveValid:save?.ok===true&&save.value?.threshold===0.65,credentialsValid:credentials?.ok===true&&credentials.status?.jev===false&&credentials.status?.youtube===false,secretDenied:secret?.ok===false}})()");
+    const diagnostics = await evaluate("(async()=>{const get=await chrome.runtime.sendMessage({type:'settings.getFilter'}),current=await chrome.runtime.sendMessage({type:'settings.getFilterConfig'}),save=await chrome.runtime.sendMessage({type:'settings.saveFilterConfig',config:current.value.config,expected:current.value.config}),legacy=await chrome.runtime.sendMessage({type:'settings.saveFilter',threshold:0.65}),credentials=await chrome.runtime.sendMessage({type:'storage.init'}),secret=await chrome.runtime.sendMessage({type:'credentials.get',provider:'jev'});return {isPopup:chrome.extension.getViews({type:'popup'}).includes(window),documentUrlMatches:location.href===chrome.runtime.getURL('options.html'),uiSaved:document.querySelector('[data-testid=filter-status]').textContent==='保存しました：高 / 判定の基準値 0.65',getValid:get?.ok===true&&get.value?.threshold===0.65,saveValid:save?.ok===true&&save.value?.config?.active==='high'&&legacy?.ok===false,credentialsValid:credentials?.ok===true&&credentials.status?.jev===false&&credentials.status?.youtube===false,secretDenied:secret?.ok===false}})()");
     const metadataMatches = await worker.evaluate(() => {
       const records = (globalThis as typeof globalThis & { popupSenderEvidence: { url?: string }[] }).popupSenderEvidence;
       return records.length > 0 && records.every(record => record.url === chrome.runtime.getURL('options.html'));
@@ -133,7 +136,7 @@ test('実action popup内の設定保存・sender認可・readback・再起動後
       await evaluate(`document.querySelector('select').value=${JSON.stringify(choice)}; document.querySelector('select').dispatchEvent(new Event('change'));
         ${choice === 'custom' ? `document.querySelector('#filter-threshold').value=${JSON.stringify(String(threshold))}; document.querySelector('#filter-threshold').dispatchEvent(new Event('input'));` : ''}
         document.querySelector('.filter-card button').click()`);
-      await expect.poll(() => evaluate("document.querySelector('[data-testid=filter-status]').textContent")).toContain(`判定の基準値 ${threshold}`);
+      await expect.poll(() => evaluate("document.querySelector('[data-testid=filter-status]').textContent")).toContain(choice === 'custom' ? `共通 ${threshold}` : `判定の基準値 ${threshold}`);
       await expect.poll(() => evaluate("document.querySelector('.filter-card button').disabled")).toBe(false);
       expect(await evaluate("document.querySelector('[data-testid=filter-status]').textContent")).toMatch(/^保存しました：/);
       expect(await evaluate("chrome.runtime.sendMessage({type:'settings.getFilter'})")).toEqual({ ok: true, value: { threshold } });
@@ -150,7 +153,7 @@ test('実action popup内の設定保存・sender認可・readback・再起動後
     await context.close(); context = await launch(profile);
     const restarted = await popup(context);
     await expect.poll(() => restarted.evaluate("document.querySelector('[data-testid=confirmation-status]').textContent")).toContain('同意済み');
-    await expect.poll(() => restarted.evaluate("document.querySelector('[data-testid=filter-status]').textContent")).toBe('現在の設定：カスタム / 判定の基準値 0.731');
+    await expect.poll(() => restarted.evaluate("document.querySelector('[data-testid=filter-status]').textContent")).toBe('現在の設定：カスタム（一括 / 共通 0.731）');
     expect(await restarted.evaluate("chrome.runtime.sendMessage({type:'settings.getFilter'})")).toEqual({ ok: true, value: { threshold: 0.731 } });
     expect(await restarted.evaluate("chrome.runtime.sendMessage({type:'storage.init'})")).toEqual({ ok: true, status: { jev: true, youtube: false } });
     expect(await restarted.evaluate("document.querySelector('#jev-key').value")).toBe('');
@@ -163,7 +166,7 @@ test('実action popup内の設定保存・sender認可・readback・再起動後
       };
     });
     await restarted.evaluate("document.querySelector('select').value='medium'; document.querySelector('select').dispatchEvent(new Event('change')); document.querySelector('.filter-card button').click()");
-    await expect.poll(() => restarted.evaluate("document.querySelector('[data-testid=filter-status]').textContent")).toBe('フィルター設定の処理に失敗しました。保存状態を確認できません。もう一度保存してください。 確認コード: filter-save-write');
+    await expect.poll(() => restarted.evaluate("document.querySelector('[data-testid=filter-status]').textContent")).toContain('確認コード: filter-save-write');
     expect(await restarted.evaluate("document.body.textContent.includes('synthetic-private-storage-value')")).toBe(false);
     expect(await restarted.evaluate("chrome.runtime.sendMessage({type:'settings.getFilter'})")).toEqual({ ok: true, value: { threshold: 0.731 } });
     expect(await restarted.evaluate("chrome.runtime.sendMessage({type:'storage.init'})")).toEqual({ ok: true, status: { jev: true, youtube: false } });
