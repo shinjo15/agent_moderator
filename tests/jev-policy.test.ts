@@ -3,6 +3,27 @@ import { categories, decide, type Values } from '../src/jev/policy';
 import { createJevClient, questions } from './fixtures/jev-client';
 import { createHistory } from '../src/jev/history';
 import { apiResponse, chatPost, japaneseExamples, realisticJapaneseExamples } from './fixtures/jev';
+it.each(categories)('%sは対応する個別基準値との境界で判定する', key => {
+  const thresholds = Object.fromEntries(categories.map(category => [category, category === key ? 0.4 : 0.9])) as Values;
+  for (const score of [0.399, 0.4, 0.401]) {
+    const values = Object.fromEntries(categories.map(category => [category, category === key ? score : 0])) as Values;
+    expect(decide(values, thresholds)).toEqual({ malicious: score >= 0.4, reasons: score >= 0.4 ? [key] : [] });
+  }
+});
+it.each(categories)('%sの個別基準0と1は両端を含む', key => {
+  const scores = Object.fromEntries(categories.map(category => [category, category === key ? 0 : 0.2])) as Values;
+  const thresholds = Object.fromEntries(categories.map(category => [category, category === key ? 0 : 1])) as Values;
+  expect(decide(scores, thresholds)).toEqual({ malicious: true, reasons: [key] });
+  thresholds[key] = 1; scores[key] = 0.999;
+  expect(decide(scores, thresholds)).toEqual({ malicious: false, reasons: [] });
+  scores[key] = 1; expect(decide(scores, thresholds)).toEqual({ malicious: true, reasons: [key] });
+});
+it('個別基準の項目欠落・余分・非有限値を拒否する', () => {
+  const values = Object.fromEntries(categories.map(key => [key, 0.5])) as Values;
+  for (const invalid of [{ ...values, attack: NaN }, { ...values, extra: 0.5 }, { attack: 0.5 }, []]) {
+    expect(() => decide(values, invalid as Values)).toThrow('Invalid moderation threshold');
+  }
+});
 it.each([0, 0.65, 0.8, 0.9, 1])('設定閾値%sで7項目のraw値をinclusive比較する', threshold => {
   for (const key of categories) for (const score of [0, 0.649999, 0.65, 0.8, 0.899999, 0.9, 1]) {
     const values = Object.fromEntries(categories.map(category => [category, category === key ? score : 0])) as Values;

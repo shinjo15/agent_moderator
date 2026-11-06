@@ -3,6 +3,31 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 declare const chrome: { runtime: { sendMessage(message: unknown): Promise<unknown> }; storage: { local: { set(values: Record<string, unknown>): Promise<void> } } };
+test('非アクティブな個別値が保存応答と読戻しで同じ不正値に変わっても成功表示しない', async () => {
+  const profile = await mkdtemp(join(tmpdir(), 'agent-moderator-inactive-'));
+  const context = await chromium.launchPersistentContext(profile, { channel: 'chromium', headless: true,
+    args: [`--disable-extensions-except=${resolve('dist')}`, `--load-extension=${resolve('dist')}`] });
+  try {
+    const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      const send = chrome.runtime.sendMessage.bind(chrome.runtime);
+      let afterSave = false;
+      chrome.runtime.sendMessage = async message => {
+        const response = await send(message) as { ok?: boolean; value?: { config?: { custom?: { individual?: Record<string, number> } } } };
+        const type = (message as { type?: string }).type;
+        if (type === 'settings.saveFilterConfig') afterSave = true;
+        if (afterSave && response.value?.config?.custom?.individual) response.value.config.custom.individual.attack = 0.123;
+        return response;
+      };
+    });
+    await page.goto(`chrome-extension://${new URL(worker.url()).hostname}/options.html`);
+    await page.getByLabel('フィルターの強さ', { exact: true }).selectOption('custom');
+    await page.getByLabel('7項目共通の判定の基準値').fill('0.5');
+    await page.getByRole('button', { name: 'フィルター設定を保存' }).click();
+    await expect(page.getByTestId('filter-status')).toContainText('filter-save-valueMismatch');
+  } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
+});
 // Response classification uses the production parser in tests/filter-diagnostics.test.ts.
 // Keep real MV3 messaging/storage failures and recovery at the extension boundary here.
 for (const fault of ['write', 'readback'] as const) {
@@ -37,10 +62,12 @@ for (const fault of ['write', 'readback'] as const) {
       await expect(page.getByTestId('filter-status')).toContainText(`確認コード: filter-save-${fault}`);
       await expect(page.getByTestId('filter-status')).not.toContainText('保存しました');
       await expect(page.locator('body')).not.toContainText('synthetic-private-key-storage-profile-error');
-      await expect(save).toBeEnabled();
+      await expect(save).toBeDisabled();
       expect(await page.evaluate(() => chrome.runtime.sendMessage({ type: 'settings.getFilter' })))
         .toEqual({ ok: true, value: { threshold: 0.8 } });
       await worker.evaluate(() => (globalThis as typeof globalThis & { restoreFilterStorage(): void }).restoreFilterStorage());
+      await page.getByRole('button', { name: '設定を再確認' }).click();
+      await expect(save).toBeEnabled();
       await save.click();
       await expect(page.getByTestId('filter-status')).toHaveText('保存しました：高 / 判定の基準値 0.65');
       expect(await page.evaluate(() => chrome.runtime.sendMessage({ type: 'settings.getFilter' })))
@@ -59,10 +86,10 @@ test('UIの初期読取・保存応答・再読取の失敗は到達段階で止
     const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
     // Each UI control-flow boundary once, not response classification × stages.
     for (const [stage, reason, shape, expectedTypes] of [
-      ['initialGet', 'transport', '', ['settings.getFilter']],
-      ['save', 'invalidShape', ' shape:000000', ['settings.getFilter', 'settings.saveFilter']],
-      ['save', 'valueMismatch', '', ['settings.getFilter', 'settings.saveFilter']],
-      ['readback', 'valueMismatch', '', ['settings.getFilter', 'settings.saveFilter', 'settings.getFilter']],
+      ['initialGet', 'transport', '', ['settings.getFilterConfig']],
+      ['save', 'invalidShape', '', ['settings.getFilterConfig', 'settings.saveFilterConfig']],
+      ['save', 'valueMismatch', '', ['settings.getFilterConfig', 'settings.saveFilterConfig']],
+      ['readback', 'valueMismatch', '', ['settings.getFilterConfig', 'settings.saveFilterConfig', 'settings.getFilterConfig']],
     ] as const) {
       const page = await context.newPage();
       await page.addInitScript(({ stage, reason }) => {
@@ -72,29 +99,32 @@ test('UIの初期読取・保存応答・再読取の失敗は到達段階で止
         Object.assign(globalThis, { filterStageProbe: { requests, recover: () => { failing = false; } } });
         chrome.runtime.sendMessage = async message => {
           const type = (message as { type?: string }).type;
-          if (type !== 'settings.getFilter' && type !== 'settings.saveFilter') return original(message);
+          if (type !== 'settings.getFilterConfig' && type !== 'settings.saveFilterConfig') return original(message);
           requests.push(type);
-          const phase = type === 'settings.saveFilter' ? 'save' : ++gets === 1 ? 'initialGet' : 'readback';
+          const phase = type === 'settings.saveFilterConfig' ? 'save' : ++gets === 1 ? 'initialGet' : 'readback';
           if (failing && phase === stage) {
             if (reason === 'transport') throw new Error('synthetic-private-stage-error');
-            return reason === 'invalidShape' ? false : { ok: true, value: { threshold: 0.9 } };
+            return reason === 'invalidShape' ? false : { ok: true, value: { config: { active: 'low', custom: null } } };
           }
           return original(message);
         };
       }, { stage, reason });
       await page.goto(`chrome-extension://${new URL(worker.url()).hostname}/options.html`);
       const save = page.getByRole('button', { name: 'フィルター設定を保存', exact: true });
-      await expect(save).toBeEnabled();
       if (stage !== 'initialGet') {
+        await expect(save).toBeEnabled();
         await page.getByLabel('フィルターの強さ', { exact: true }).selectOption('medium');
         await save.click();
       }
       await expect(page.getByTestId('filter-status')).toContainText(`確認コード: filter-${stage}-${reason}${shape}`);
       await expect(page.getByTestId('filter-status')).not.toContainText('保存しました');
       await expect(page.locator('body')).not.toContainText('synthetic-private-stage-error');
-      await expect(save).toBeEnabled();
+      await expect(save).toBeDisabled();
       expect(await page.evaluate(() => (globalThis as typeof globalThis & { filterStageProbe: { requests: string[] } }).filterStageProbe.requests)).toEqual([...expectedTypes]);
       await page.evaluate(() => (globalThis as typeof globalThis & { filterStageProbe: { recover(): void } }).filterStageProbe.recover());
+      await page.getByRole('button', { name: '設定を再確認' }).click();
+      await expect(save).toBeEnabled();
+      await page.getByLabel('フィルターの強さ', { exact: true }).selectOption('medium');
       await save.click();
       await expect(page.getByTestId('filter-status')).toHaveText('保存しました：中 / 判定の基準値 0.8');
       await page.close();

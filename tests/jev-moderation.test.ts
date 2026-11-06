@@ -2,9 +2,87 @@ import { expect, it, vi } from 'vitest';
 import { createModeration as createUnconfirmedModeration } from '../src/jev/moderation';
 import { createJevClient, questions } from './fixtures/jev-client';
 import { apiResponse, chatPost } from './fixtures/jev';
+import { categories, type Values } from '../src/jev/policy';
 // Existing core scenarios represent an explicitly confirmed fixture user.
 const createModeration = (deps: Parameters<typeof createUnconfirmedModeration>[0]) =>
   createUnconfirmedModeration({ readConfirmation: async () => true, ...deps });
+
+it('旧monitorは個別snapshotでPOSTせず、設定を共通へ変えても明示再開まで後続を送らない', async () => {
+  const individual = Object.fromEntries(categories.map(key => [key, 0.4])) as Values;
+  let threshold: number | Values = individual;
+  let release!: (value: number | Values) => void;
+  const readThreshold = vi.fn(() => new Promise<number | Values>(resolve => { release = resolve; }));
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(apiResponse({ attack: 0.7 }))));
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic', readThreshold });
+  await moderation.enable(); moderation.observe([chatPost('old'), chatPost('later', 1)]);
+  const pending = moderation.evaluate('old', false);
+  await vi.waitFor(() => expect(readThreshold).toHaveBeenCalledTimes(1));
+  const snapshot = threshold; threshold = 0.65; release(snapshot);
+  expect(await pending).toMatchObject({ ok: true, value: { jev: 'failed', error: { code: 'invalidResponse' } } });
+  expect(await moderation.evaluate('later', false)).toMatchObject({ ok: true, value: { jev: 'failed' } });
+  expect(fetcher).not.toHaveBeenCalled(); expect(readThreshold).toHaveBeenCalledTimes(1);
+  await moderation.enable(); readThreshold.mockResolvedValue(threshold);
+  expect(await moderation.evaluate('later', false)).toMatchObject({ ok: true, value: { jev: 'evaluated', threshold: 0.65, malicious: true } });
+  expect(fetcher).toHaveBeenCalledTimes(1); moderation.reset();
+});
+
+it('旧monitorの共通snapshot送信中に個別へ変更してもその結果は共通のまま', async () => {
+  let threshold: number | Values = 0.65;
+  let finish!: (value: Response) => void;
+  const fetcher = vi.fn(() => new Promise<Response>(resolve => { finish = resolve; }));
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic', readThreshold: async () => threshold });
+  await moderation.enable(); moderation.observe([chatPost('scalar')]);
+  const pending = moderation.evaluate('scalar', false);
+  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+  threshold = Object.fromEntries(categories.map(key => [key, 0.9])) as Values;
+  finish(new Response(JSON.stringify(apiResponse({ attack: 0.7 }))));
+  expect(await pending).toMatchObject({ ok: true, value: { jev: 'evaluated', threshold: 0.65, malicious: true } });
+  expect(await moderation.evaluate('scalar', false)).toMatchObject({ ok: true, value: { threshold: 0.65, malicious: true } });
+  expect(fetcher).toHaveBeenCalledTimes(1); moderation.reset();
+});
+
+it.each(['old-first', 'new-first'])('同一IDの混在%sは新画面のPOSTだけを共有し旧画面へ個別結果を返さない', async order => {
+  const threshold = Object.fromEntries(categories.map(key => [key, 0.4])) as Values;
+  let finish!: (value: Response) => void;
+  const fetcher = vi.fn(() => new Promise<Response>(resolve => { finish = resolve; }));
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic', readThreshold: async () => threshold });
+  await moderation.enable(); moderation.observe([chatPost('shared')]);
+  const first = moderation.evaluate('shared', order === 'new-first');
+  const second = moderation.evaluate('shared', order !== 'new-first');
+  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+  finish(new Response(JSON.stringify(apiResponse({ attack: 0.7 }))));
+  const results = await Promise.all([first, second]);
+  expect(results[order === 'old-first' ? 0 : 1]).toMatchObject({ ok: true, value: { jev: 'failed', error: { code: 'invalidResponse' } } });
+  expect(results[order === 'new-first' ? 0 : 1]).toMatchObject({ ok: true, value: { jev: 'evaluated', threshold, malicious: true } });
+  expect(await moderation.evaluate('shared', false)).toMatchObject({ ok: true, value: { jev: 'failed' } });
+  expect(await moderation.evaluate('shared', true)).toMatchObject({ ok: true, value: { jev: 'evaluated', threshold } });
+  expect(fetcher).toHaveBeenCalledTimes(1); moderation.reset();
+});
+
+it('旧monitor停止中も連投判定はPOSTなしで独立して有効', async () => {
+  const threshold = Object.fromEntries(categories.map(key => [key, 0.4])) as Values;
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(apiResponse())));
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic', readThreshold: async () => threshold });
+  await moderation.enable(); moderation.observe([chatPost('old')]); await moderation.evaluate('old', false);
+  moderation.observe(Array.from({ length: 10 }, (_, i) => chatPost(`burst-${i}`, 1000 + i * 500)));
+  expect(await moderation.evaluate('burst-9', false)).toMatchObject({ ok: true, value: { burst: 'confirmed', malicious: true, reasons: ['burst'] } });
+  expect(fetcher).not.toHaveBeenCalled(); moderation.reset();
+});
+
+it('個別基準は開始時にコピーし処理中の変更に影響されず待機中の次判定へ反映', async () => {
+  const thresholds = Object.fromEntries(categories.map(key => [key, key === 'attack' ? 0.4 : 0.9])) as Values;
+  let finish!: (response: Response) => void;
+  const fetcher = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }))
+    .mockImplementation(async () => new Response(JSON.stringify(apiResponse({ attack: 0.5 }))));
+  const moderation = createModeration({ client: createJevClient(fetcher), readKey: async () => 'synthetic', readThreshold: async () => thresholds });
+  await moderation.enable(); moderation.observe([chatPost('snapshot-individual'), chatPost('next-individual', 1)]);
+  const first = moderation.evaluate('snapshot-individual'); const second = moderation.evaluate('next-individual');
+  await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+  thresholds.attack = 0.8; finish(new Response(JSON.stringify(apiResponse({ attack: 0.5 }))));
+  expect(await first).toMatchObject({ ok: true, value: { threshold: { attack: 0.4 }, malicious: true, reasons: ['attack'] } });
+  expect(await second).toMatchObject({ ok: true, value: { threshold: { attack: 0.8 }, malicious: false, reasons: [] } });
+  moderation.reset();
+});
 
 it('本文なしスパチャはJev対象にも60秒文脈にも入れず連投の観測だけ維持する', async () => {
   const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify(apiResponse())));

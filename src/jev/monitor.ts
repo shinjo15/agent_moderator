@@ -27,6 +27,7 @@ export function createJevPanel(main: HTMLElement, transport: ReturnType<typeof c
   let enabled = false;
   let valid = false;
   let enabling = false;
+  let updateRequired = false;
   type Job = { key: string; item: HTMLElement; expires: number; update(message: string, compact: string): void; run(): Promise<void> };
   let sequence = 0;
   let busy = false;
@@ -50,7 +51,7 @@ export function createJevPanel(main: HTMLElement, transport: ReturnType<typeof c
       pending.delete(job); busy = false; drain();
     });
   }
-  function buttons() { enable.disabled = !valid || enabling || enabled; disable.disabled = !enabled && !enabling; }
+  function buttons() { enable.disabled = updateRequired || !valid || enabling || enabled; disable.disabled = !enabled && !enabling; }
   function stop(message = t('jevStopped'), collection = false) {
     generation++; enabled = false; enabling = false; status.textContent = message; buttons();
     for (const job of pending) job.update(t('unjudgedStopped'), t('evaluationStoppedSummary'));
@@ -91,11 +92,16 @@ export function createJevPanel(main: HTMLElement, transport: ReturnType<typeof c
     const key = String(++sequence);
     const job: Job = { key, item, expires, update, async run() {
       if (current !== generation) return;
+      if (updateRequired) { update(failure('updateRequired'), t('evaluationFailed')); return; }
       if (eligible && enabled) update(t('evaluationInProgressDetail'), t('evaluationInProgress'));
       const result = await transport.evaluate(id, author);
       if (current !== generation) return;
       evaluated();
       pending.delete(job);
+      if (result?.jev === 'failed' && result.error?.code === 'updateRequired') {
+        updateRequired = true; stop(t('evaluationStopped', failure('updateRequired')));
+        update(failure('updateRequired'), t('evaluationFailed')); return;
+      }
       if (result?.jev === 'failed') { enabled = false; status.textContent = t('evaluationStopped', failure(result.error!.code)); buttons(); }
       if (Date.now() >= expires) { update(t('unjudgedTimeout'), t('evaluationExpired')); return; }
       if (!item.parentNode) return;
@@ -105,7 +111,8 @@ export function createJevPanel(main: HTMLElement, transport: ReturnType<typeof c
 
       const time = result.burst === 'unavailable' ? t('burstUnavailable') : '';
       const jev = result.jev === 'failed' ? t('jevFailedResult', failure(result.error!.code))
-        : result.jev === 'disabled' ? t('jevDisabledResult') : result.jev === 'unjudged' ? t('jevUnjudgedResult') : t('jevEvaluatedResult', String(result.threshold));
+        : result.jev === 'disabled' ? t('jevDisabledResult') : result.jev === 'unjudged' ? t('jevUnjudgedResult')
+          : typeof result.threshold === 'number' ? t('jevEvaluatedResult', result.threshold) : t('jevIndividualResult');
       const score = result.jev === 'evaluated' && result.evaluation
         ? Math.max(...categories.map(key => result.evaluation!.values[key])).toFixed(2) : undefined;
       update(`${outcome}${jev}${time}`, t(result.jev === 'evaluated' ? 'evaluationComplete'
@@ -118,7 +125,8 @@ export function createJevPanel(main: HTMLElement, transport: ReturnType<typeof c
         const values = document.createElement('dl');
         for (const key of categories) {
           const name = document.createElement('dt'); name.textContent = t(`category_${key}`);
-          const value = document.createElement('dd'); value.textContent = String(result.evaluation.values[key]);
+          const value = document.createElement('dd'); value.textContent = t('scoreWithThreshold', result.evaluation.values[key],
+            typeof result.threshold === 'number' ? result.threshold : result.threshold![key]);
           values.append(name, value);
         }
         details.append(summary, values); display.append(details);
@@ -142,8 +150,8 @@ export function createJevPanel(main: HTMLElement, transport: ReturnType<typeof c
   return { add, remove, stop,
     resetTarget() {
       generation++; enabled = false; enabling = false; valid = false;
-      pending.clear(); waiting.clear(); status.textContent = t('jevNotEnabled'); buttons();
+      pending.clear(); waiting.clear(); status.textContent = updateRequired ? t('evaluationStopped', failure('updateRequired')) : t('jevNotEnabled'); buttons();
     },
-    resolved(active: boolean) { enabled = active; enabling = false; status.textContent = t(active ? 'jevEnabled' : 'jevNotEnabled'); buttons(); },
+    resolved(active: boolean) { enabled = !updateRequired && active; enabling = false; status.textContent = updateRequired ? t('evaluationStopped', failure('updateRequired')) : t(active ? 'jevEnabled' : 'jevNotEnabled'); buttons(); },
     setTarget(available: boolean) { valid = available; buttons(); } };
 }

@@ -163,6 +163,8 @@ it('書込失敗・readback不一致・不正保存値を設定成功として�
   expect(await send({ type: 'settings.saveFilter', threshold: 0.65 })).toMatchObject({ ok: false });
   data['moderation.threshold'] = '0.65';
   expect(await send({ type: 'settings.getFilter' })).toMatchObject({ ok: false });
+  expect(await send({ type: 'settings.saveFilter', threshold: 0 })).toMatchObject({ ok: false, code: 'invalidStored' });
+  expect(await send({ type: 'settings.resetInvalidFilter' })).toEqual({ ok: true, value: { config: { active: 'medium', custom: null } } });
   expect(await send({ type: 'settings.saveFilter', threshold: 0 })).toEqual({ ok: true, value: { threshold: 0 } });
 });
 

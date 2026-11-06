@@ -4,9 +4,11 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { apiResponse } from '../tests/fixtures/jev';
 import { confirmUsage } from './fixtures/confirm-usage';
+import { categories } from '../src/jev/policy';
 declare const chrome: { tabs: { create(options: { url: string; active: boolean }): Promise<unknown> }; runtime: { sendMessage(message: unknown): Promise<unknown> } };
 const video = 'abcdefghijk';
 const cases = [
+  { threshold: 0.65, score: 0.7, malicious: true },
   { threshold: 0.65, score: 0.7, malicious: true },
   { threshold: 0.9, score: 0.85, malicious: false },
   { threshold: 0, score: 0, malicious: true },
@@ -36,12 +38,12 @@ test('MV3 threshold: 実policy/runtime/非表示・0/1・遅延snapshot/cached�
         : { nextPageToken: `next-${index}`, pollingIntervalMillis: 5000, items: [{ id: `post-${index}`, snippet: { type: 'textMessageEvent', hasDisplayContent: true,
           displayMessage: `API fixture ${index}`, publishedAt: new Date().toISOString() }, authorDetails: { channelId: authors[index] } }] } });
     });
-    let release!: () => void;
+    let release: (() => void) | undefined;
     await context.route('https://api.typesafe.ai/v1/systemone', async route => {
       const current = index; calls++;
       expect(JSON.stringify(route.request().postDataJSON())).not.toContain('threshold');
       expect(Object.keys(route.request().postDataJSON().questions)).toHaveLength(7);
-      if (current === 0) await new Promise<void>(resolve => { release = resolve; });
+      if (current <= 1) await new Promise<void>(resolve => { release = resolve; });
       await route.fulfill({ json: apiResponse({ attack: cases[current].score }) });
     });
     const options = await context.newPage(); await options.goto(`chrome-extension://${id}/options.html`);
@@ -65,21 +67,39 @@ test('MV3 threshold: 実policy/runtime/非表示・0/1・遅延snapshot/cached�
     const frame = youtube.frames().find(frame => frame.url().includes('/live_chat'))!;
     for (index = 0; index < cases.length; index++) {
       const scenario = cases[index];
-      expect(await options.evaluate(threshold => chrome.runtime.sendMessage({ type: 'settings.saveFilter', threshold }), scenario.threshold))
-        .toEqual({ ok: true, value: { threshold: scenario.threshold } });
+      const individual = Object.fromEntries(categories.map(key => [key, key === 'attack' ? 0.65 : 0.9]));
+      if (index === 0) {
+        const config = { active: 'custom', custom: { mode: 'individual', bulk: 0.8, individual } };
+        expect(await options.evaluate(async config => {
+          const response = await chrome.runtime.sendMessage({ type: 'settings.getFilterConfig' }) as { value: { config: unknown } };
+          return chrome.runtime.sendMessage({ type: 'settings.saveFilterConfig', config, expected: response.value.config });
+        }, config))
+          .toEqual({ ok: true, value: { config } });
+      } else {
+        expect(await options.evaluate(async threshold => {
+          const response = await chrome.runtime.sendMessage({ type: 'settings.getFilterConfig' }) as { value: { config: { active: string; custom: { mode: string; bulk: number; individual: Record<string, number> } | null } } };
+          const expected = response.value.config;
+          const active = threshold === 0.65 ? 'high' : threshold === 0.8 ? 'medium' : threshold === 0.9 ? 'low' : 'custom';
+          const config = { active, custom: active === 'custom' ? { ...expected.custom!, mode: 'bulk', bulk: threshold } : expected.custom };
+          return chrome.runtime.sendMessage({ type: 'settings.saveFilterConfig', config, expected });
+        }, scenario.threshold)).toMatchObject({ ok: true });
+      }
       const before = calls;
       await monitor.getByRole('button', { name: 'Jev判定を有効化・再開' }).click();
       await expect(monitor.getByTestId('jev-status')).toContainText('有効');
       await monitor.getByRole('button', { name: '取得を開始', exact: true }).click();
-      if (index === 0) {
+      if (index <= 1) {
         await expect.poll(() => typeof release, { timeout: 15000 }).toBe('function');
-        expect(await options.evaluate(() => chrome.runtime.sendMessage({ type: 'settings.saveFilter', threshold: 0.9 })))
-          .toEqual({ ok: true, value: { threshold: 0.9 } });
-        expect(calls).toBe(before + 1); release();
+        expect(await options.evaluate(async () => {
+          const response = await chrome.runtime.sendMessage({ type: 'settings.getFilterConfig' }) as { value: { config: { custom: unknown } } };
+          return chrome.runtime.sendMessage({ type: 'settings.saveFilterConfig', expected: response.value.config,
+            config: { active: 'low', custom: response.value.config.custom } });
+        })).toMatchObject({ ok: true });
+        expect(calls).toBe(before + 1); release!(); release = undefined;
       }
       const row = monitor.locator('#messages li').filter({ hasText: `API fixture ${index}` });
-      await expect.poll(() => monitor.evaluate(id => chrome.runtime.sendMessage({ type: 'jev.evaluate', id }), `post-${index}`), { timeout: 15000 })
-        .toMatchObject({ ok: true, value: { threshold: scenario.threshold, malicious: scenario.malicious } });
+      await expect.poll(() => monitor.evaluate(id => chrome.runtime.sendMessage({ type: 'jev.evaluate', id, thresholdFormat: 2 }), `post-${index}`), { timeout: 15000 })
+        .toMatchObject({ ok: true, value: { threshold: index === 0 ? individual : scenario.threshold, malicious: scenario.malicious } });
       if (scenario.malicious) {
         await expect(monitor.locator('#hidden-authors')).toContainText(authors[index]);
         await expect(row).toHaveCount(0);
@@ -91,8 +111,20 @@ test('MV3 threshold: 実policy/runtime/非表示・0/1・遅延snapshot/cached�
         await expect(frame.locator(`#author-${index}`)).toBeVisible();
       }
       if (index === 0) {
-        expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'jev.evaluate', id: 'post-0' })))
-          .toMatchObject({ ok: true, value: { threshold: 0.65, malicious: true } });
+        expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'jev.evaluate', id: 'post-0', thresholdFormat: 2 })))
+          .toMatchObject({ ok: true, value: { threshold: individual, malicious: true, reasons: ['attack'] } });
+        expect(calls).toBe(before + 1);
+        await monitor.getByRole('button', { name: '非表示一覧', exact: true }).click();
+        await monitor.locator('#hidden-authors button').click();
+        await expect(row).toContainText('人への攻撃、侮辱、人格否定');
+        await expect(row).toContainText('項目別基準値');
+        await expect(row).toContainText('スコア 0.7 / 判定の基準値 0.65');
+        await expect(row).not.toContainText('[object Object]');
+        await monitor.keyboard.press('Escape');
+      }
+      if (index === 1) {
+        expect(await monitor.evaluate(() => chrome.runtime.sendMessage({ type: 'jev.evaluate', id: 'post-1', thresholdFormat: 2 })))
+          .toMatchObject({ ok: true, value: { threshold: 0.65, malicious: true, reasons: ['attack'] } });
         expect(calls).toBe(before + 1);
       }
       await monitor.getByRole('button', { name: '取得を停止', exact: true }).click();

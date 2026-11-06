@@ -1,7 +1,8 @@
 import type { runtime } from '../extension-runtime';
 import type { Evaluation, JevError } from './contracts';
 import type { ModerationResult } from './moderation';
-import { categories, decide, type Values } from './policy';
+import { categories, decide, validThresholds, type Values } from './policy';
+import type { EffectiveThreshold } from './filter-config';
 import { validThreshold } from './threshold';
 const object = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const errors = ['definition', 'confirmationRequired', 'missingKey', 'auth', 'validation', 'rateLimited', 'overloaded', 'network', 'invalidResponse', 'aborted', 'api'];
@@ -34,7 +35,16 @@ export function createModerationTransport(channel: Pick<typeof runtime, 'sendMes
     async stop(collection = false) { try { await channel.sendMessage({ type: collection ? 'jev.stopCollection' : 'jev.disable' }); } catch { /* Worker unavailable, no retry. */ } },
     async evaluate(id: string, authorChannelId: string): Promise<ModerationResult | undefined> {
       try {
-        const response = await channel.sendMessage({ type: 'jev.evaluate', id });
+        const response = await channel.sendMessage({ type: 'jev.evaluate', id, thresholdFormat: 2 });
+        if (object(response) && response.ok === false && object(response.error) && response.error.code === 'invalidInput') {
+          // A target navigation can also return invalidInput. Probe without
+          // evaluating again; the legacy handler rejects this message shape.
+          const capability = await channel.sendMessage({ type: 'jev.capabilities' });
+          if (object(capability) && capability.ok === false && object(capability.error) && capability.error.code === 'invalidInput') {
+            return { id, authorChannelId, burst: 'unavailable', jev: 'failed', reasons: [], error: { code: 'updateRequired' } };
+          }
+          return undefined;
+        }
         if (!object(response) || response.ok !== true || !object(response.value)) return undefined;
         const value = response.value;
         if (value.id !== id || value.authorChannelId !== authorChannelId || !['confirmed', 'notObserved', 'unavailable'].includes(String(value.burst))
@@ -42,15 +52,15 @@ export function createModerationTransport(channel: Pick<typeof runtime, 'sendMes
           || (value.malicious !== undefined && typeof value.malicious !== 'boolean') || !Array.isArray(value.reasons)
           || !value.reasons.every(reason => reason === 'burst' || categories.includes(reason))) return undefined;
         const evaluated = value.jev === 'evaluated' ? evaluation(value.evaluation) : undefined;
-        if (value.jev === 'evaluated' && (!evaluated || !validThreshold(value.threshold))) return undefined;
-        const expected = evaluated ? decide(evaluated.values, value.threshold as number) : { malicious: undefined as boolean | undefined, reasons: [] as ModerationResult['reasons'] };
+        if (value.jev === 'evaluated' && (!evaluated || (!validThreshold(value.threshold) && !validThresholds(value.threshold)))) return undefined;
+        const expected = evaluated ? decide(evaluated.values, value.threshold as EffectiveThreshold) : { malicious: undefined as boolean | undefined, reasons: [] as ModerationResult['reasons'] };
         const reasons: ModerationResult['reasons'] = [...expected.reasons];
         if (value.burst === 'confirmed') { expected.malicious = true; reasons.push('burst'); }
         const actualReasons = value.reasons;
         if (value.malicious !== expected.malicious || actualReasons.length !== reasons.length || !reasons.every((reason, i) => actualReasons[i] === reason)) return undefined;
         return { id, authorChannelId, burst: value.burst as ModerationResult['burst'], jev: value.jev as ModerationResult['jev'],
           malicious: value.malicious as boolean | undefined, reasons: value.reasons as ModerationResult['reasons'],
-          ...(evaluated ? { evaluation: evaluated, threshold: value.threshold as number } : {}),
+          ...(evaluated ? { evaluation: evaluated, threshold: value.threshold as EffectiveThreshold } : {}),
           ...(value.jev === 'failed' ? { error: error(value.error) } : {}) };
       } catch { return undefined; }
     },

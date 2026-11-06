@@ -1,25 +1,27 @@
 import type { ChatMessage } from '../youtube/contracts';
 import type { Evaluation, JevClient, JevError } from './contracts';
 import { createHistory, type Context } from './history';
-import { decide, type Category } from './policy';
+import { decide, validThresholds, type Category } from './policy';
+import type { EffectiveThreshold } from './filter-config';
 import type { SessionStorage } from '../youtube/background-handler';
 import { createBoundedQueue, createTransientMap, MAX_PENDING_EVALUATIONS } from '../retention';
 import { DEFAULT_THRESHOLD, validThreshold } from './threshold';
 export type ModerationResult = {
   id: string; authorChannelId: string; burst: Context['burst'];
   malicious?: boolean; reasons: (Category | 'burst')[];
-  jev: 'evaluated' | 'disabled' | 'unjudged' | 'failed'; evaluation?: Evaluation; threshold?: number; error?: JevError;
+  jev: 'evaluated' | 'disabled' | 'unjudged' | 'failed'; evaluation?: Evaluation; threshold?: EffectiveThreshold; error?: JevError;
 };
 export function createModeration({ client, readKey, session, now = Date.now, readThreshold = async () => DEFAULT_THRESHOLD, readConfirmation = async () => false }: {
   client: JevClient; readKey: () => Promise<string | undefined>;
   session?: Pick<SessionStorage, 'get' | 'set'>; now?: () => number;
-  readThreshold?: () => Promise<number>;
+  readThreshold?: () => Promise<EffectiveThreshold>;
   readConfirmation?: () => Promise<boolean>;
 }) {
   const history = createHistory({ now });
   type Record = { authorChannelId: string; burst: Context['burst']; allowed: boolean; result?: ModerationResult };
   const records = createTransientMap<Record>({ now });
   let enabled = false;
+  let legacyBlocked = false;
   let generation = 0;
   let controller: AbortController | undefined;
   const exclusive = createBoundedQueue({ now, limit: MAX_PENDING_EVALUATIONS });
@@ -55,23 +57,33 @@ export function createModeration({ client, readKey, session, now = Date.now, rea
       stop(); return { ok: false as const, error: { code: 'network' as const } };
     }
     if (current !== generation) return { ok: false as const, error: { code: 'aborted' as const } };
-    enabled = true;
+    enabled = true; legacyBlocked = false;
     return { ok: true as const };
   }
-  async function evaluateOne(id: string, current: number, record: Record) {
+  async function evaluateOne(id: string, current: number, record: Record, supportsIndividual: boolean) {
     if (current !== generation) return { ok: false as const, error: { code: 'aborted' as const } };
     if (records.get(id) !== record) return { ok: false as const, error: { code: 'forbidden' as const } };
-    if (record.result) return { ok: true as const, value: record.result };
     const base: ModerationResult = { id, authorChannelId: record.authorChannelId, burst: record.burst, reasons: [], jev: 'disabled' };
+    const incompatible = () => {
+      legacyBlocked = true;
+      return { ok: true as const, value: { ...base, jev: 'failed' as const, error: { code: 'invalidResponse' as const } } };
+    };
+    if (!supportsIndividual && record.burst !== 'confirmed' && legacyBlocked) return incompatible();
+    if (record.result) {
+      if (!supportsIndividual && record.result.jev === 'evaluated' && typeof record.result.threshold === 'object') return incompatible();
+      return { ok: true as const, value: record.result };
+    }
     if (enabled && record.allowed && record.burst === 'confirmed') base.jev = 'unjudged';
     if (enabled && record.allowed && record.burst !== 'confirmed') {
       if (history.context(id)) {
         let failureCode: JevError['code'] = 'network';
         try {
           // Capture once at new evaluation start, not observation/enqueue/response time.
-          const threshold = await readThreshold();
-          if (!validThreshold(threshold)) throw new Error('Invalid filter threshold');
+          const read = await readThreshold();
+          if (!validThreshold(read) && !validThresholds(read)) throw new Error('Invalid filter threshold');
+          const threshold = typeof read === 'number' ? read : { ...read };
           if (current !== generation) return { ok: false as const, error: { code: 'aborted' as const } };
+          if (!supportsIndividual && typeof threshold === 'object') return incompatible();
           // Local I/O precedes all send snapshots/gates. stop() cancels it as well as POST.
           controller = new AbortController();
           failureCode = 'definition';
@@ -136,15 +148,16 @@ export function createModeration({ client, readKey, session, now = Date.now, rea
     record.result = base;
     return { ok: true as const, value: base };
   }
-  function evaluate(id: string) {
-    const duplicate = pending.get(id);
+  function evaluate(id: string, supportsIndividual = true) {
+    const pendingKey = JSON.stringify([id, supportsIndividual]);
+    const duplicate = pending.get(pendingKey);
     if (duplicate) return duplicate;
     const record = records.get(id);
     if (!record || pending.size >= MAX_PENDING_EVALUATIONS) return Promise.resolve({ ok: false as const, error: { code: 'forbidden' as const } });
     const current = generation;
-    const result = exclusive(() => evaluateOne(id, current, record)).catch(() => ({ ok: false as const, error: { code: 'forbidden' as const } }));
-    pending.set(id, result);
-    void result.finally(() => pending.delete(id));
+    const result = exclusive(() => evaluateOne(id, current, record, supportsIndividual)).catch(() => ({ ok: false as const, error: { code: 'forbidden' as const } }));
+    pending.set(pendingKey, result);
+    void result.finally(() => pending.delete(pendingKey));
     return result;
   }
   // The retained target is owned by background history, never by UI payloads.

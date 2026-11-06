@@ -1,6 +1,6 @@
 import { validThreshold } from './threshold';
 // Fixed diagnostic vocabulary only. Never derive codes/messages from an exception or payload.
-export const filterFailureReasons = ['authorization', 'initialize', 'read', 'write', 'readback', 'invalidStored', 'invalidInput', 'unavailable'] as const;
+export const filterFailureReasons = ['authorization', 'initialize', 'read', 'write', 'readback', 'invalidStored', 'invalidInput', 'unavailable', 'conflict'] as const;
 export type FilterSettingsReason = typeof filterFailureReasons[number];
 export type FilterDiagnosticReason = FilterSettingsReason | 'transport' | 'noResponse' | 'inconsistentResponse'
   | 'responseDeniedLegacy' | 'unknownFailureCode' | 'invalidShape' | 'valueMismatch';

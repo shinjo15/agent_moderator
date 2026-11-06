@@ -10,7 +10,7 @@ declare const monitorFixture: { append(): void; appendMany(count: number): void;
 const authorId = (id: string) => `UC${id.padEnd(22, '_')}`;
 
 // Assigned UI fixture results, not live API output or model accuracy measurements.
-async function withMonitor(run: (page: Page, worker: Worker) => Promise<void>, locale = 'ja', paid = false) {
+async function withMonitor(run: (page: Page, worker: Worker) => Promise<void>, locale = 'ja', paid = false, oldWorker = false) {
   const profile = await mkdtemp(join(tmpdir(), 'agent-moderator-monitor-ui-'));
   const extension = resolve('dist');
   const context = await chromium.launchPersistentContext(profile, {
@@ -22,7 +22,7 @@ async function withMonitor(run: (page: Page, worker: Worker) => Promise<void>, l
     const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
     const page = await context.newPage();
     await page.clock.install();
-    await page.addInitScript(({ categories, paid }) => {
+    await page.addInitScript(({ categories, paid, oldWorker }) => {
       let batch = 0;
       let held: Promise<void> | undefined;
       let release = () => {};
@@ -54,6 +54,7 @@ async function withMonitor(run: (page: Page, worker: Worker) => Promise<void>, l
       } });
       chrome.runtime.sendMessage = async request => {
         const value = request as { type: string; id: string; authorChannelId: string };
+        if (oldWorker && value.type === 'jev.capabilities') return { ok: false, error: { code: 'invalidInput' } };
         if (value.type === 'youtube.status') return targetPending ? { ok: false, error: { code: 'aborted', targetChanged: true } }
           : { ok: true, value: { videoId: video, credentialsAvailable: true } };
         if (value.type === 'youtube.resolve') return { ok: true, value: { liveChatId: 'fixture' } };
@@ -69,6 +70,7 @@ async function withMonitor(run: (page: Page, worker: Worker) => Promise<void>, l
         if (value.type === 'hidden.remove') { hidden = hidden.filter(id => id !== value.authorChannelId); return { ok: true }; }
         if (value.type === 'jev.evaluate') {
           requests++; await held;
+          if (oldWorker) return { ok: false, error: { code: 'invalidInput' } };
           if (value.id === 'missing') return { ok: false };
           const evaluated = ['zero', 'rounded', 'bad'].includes(value.id);
           const score = value.id === 'rounded' ? 0.799999 : value.id === 'bad' ? 0.8 : 0;
@@ -84,11 +86,28 @@ async function withMonitor(run: (page: Page, worker: Worker) => Promise<void>, l
         }
         return { ok: true };
       };
-    }, { categories: [...keys], paid });
+    }, { categories: [...keys], paid, oldWorker });
     await page.goto(`chrome-extension://${new URL(worker.url()).hostname}/monitor.html`);
     await run(page, worker);
   } finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
 }
+
+test('旧workerの形式拒否は再送せず更新案内を表示し評価を停止する', async () => {
+  await withMonitor(async (page, worker) => {
+    await collect(page);
+    await expect(page.getByTestId('jev-status')).toContainText('拡張機能画面でこの拡張機能を再読み込み');
+    await expect(page.getByRole('button', { name: 'Jev判定を有効化・再開' })).toBeDisabled();
+    expect(await page.evaluate(() => monitorFixture.requests())).toBe(1);
+    await page.evaluate(() => monitorFixture.append()); await page.clock.runFor(5100);
+    expect(await page.evaluate(() => monitorFixture.requests())).toBe(1);
+    await page.evaluate(() => monitorFixture.setTarget('zyxwvutsrqp'));
+    await worker.evaluate(() => chrome.runtime.sendMessage({ type: 'youtube.targetChanged' }));
+    await page.clock.runFor(5100);
+    await expect(page.getByTestId('jev-status')).toContainText('拡張機能画面でこの拡張機能を再読み込み');
+    await expect(page.getByRole('button', { name: 'Jev判定を有効化・再開' })).toBeDisabled();
+    expect(await page.evaluate(() => monitorFixture.requests())).toBe(1);
+  }, 'ja', false, true);
+});
 
 test('Super Chat UI fixture: admission保留/解除/200件/過去位置/TTL/切替後の遅延判定', async () => {
   await withMonitor(async (page, worker) => {
@@ -349,7 +368,7 @@ test('monitor UI fixture: 密なコメント・最大スコア/raw・配信別�
     await expect(row('rounded').locator('.message-details')).toHaveAttribute('open', '');
     await details.locator('summary').click();
     await expect(details.locator('dt')).toHaveCount(7);
-    await expect(details.locator('dd').first()).toHaveText('0.799999');
+    await expect(details.locator('dd').first()).toHaveText('スコア 0.799999 / 判定の基準値 0.8');
     for (const id of ['disabled', 'burst', 'missing', 'failed']) {
       await expect(row(id).locator('.score-badge')).toHaveText(id === 'burst' ? '× —' : id === 'failed' ? '!' : '—');
       await expect(row(id).locator('.score-badge')).toHaveAttribute('data-state', id === 'burst' ? 'bad' : 'neutral');
